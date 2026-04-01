@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables (contains secrets)
+.env
+
+# Database & audio data
+data/smartvoice.db
+data/raw_audio/
+
+# Converted CTranslate2 models (large, regenerated on first run)
+data/models/
+
+# Docs output
+docs/er_diagram.png
+
+# OS
+.DS_Store
+Thumbs.db

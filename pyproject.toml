@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smartvoice"
+version = "0.1.0"
+description = "AI-powered Call Center Analytics — Thai STT, diarization, and LLM analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit",
+    "python-dotenv",
+    "pandas",
+    "plotly",
+    "requests",
+    "faster-whisper",
+    "transformers",
+    "torch",
+    "pyannote.audio",
+    "soundfile",
+    "noisereduce",
+    "scipy",
+    "huggingface_hub",
+]
+
+[project.scripts]
+smartvoice = "smartvoice.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["smartvoice*"]

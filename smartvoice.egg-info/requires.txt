@@ -1,0 +1,16 @@
+streamlit
+python-dotenv
+pandas
+plotly
+requests
+faster-whisper
+transformers
+torch
+pyannote.audio
+soundfile
+noisereduce
+scipy
+huggingface_hub
+
+[dev]
+pytest

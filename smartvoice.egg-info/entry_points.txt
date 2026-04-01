@@ -1,0 +1,2 @@
+[console_scripts]
+smartvoice = smartvoice.cli:main
