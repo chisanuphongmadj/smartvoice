@@ -1152,6 +1152,8 @@ def process_call(call_id: int, step_callback=None) -> dict:
             platform_mentions=analysis.get("platform_mentions", ""),
             anomaly_detected=analysis.get("anomaly_detected", False),
             anomaly_reason=analysis.get("anomaly_reason", ""),
+            sentiment_reason=analysis.get("sentiment_reason", ""),
+            anomaly_severity=analysis.get("anomaly_severity", ""),
         )
 
         elapsed = time.time() - _start

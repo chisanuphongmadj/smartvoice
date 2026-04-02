@@ -111,7 +111,8 @@ with chart_col1:
 
 with chart_col2:
     st.subheader("Topic / Intent Distribution")
-    topic_counts = df["topic"].value_counts().reset_index()
+    topic_series = df["topic"].replace("", pd.NA).dropna()
+    topic_counts = topic_series.value_counts().reset_index()
     topic_counts.columns = ["Topic", "Count"]
     fig_topic = px.bar(topic_counts, x="Count", y="Topic", orientation="h", text="Count")
     fig_topic.update_traces(
@@ -238,7 +239,9 @@ with anom_col:
     if anom_calls:
         for c in anom_calls:
             reason = c.get("anomaly_reason") or "ไม่ระบุสาเหตุ"
-            st.warning(f"**{c['filename']}**  \n{reason}")
+            severity = c.get("anomaly_severity") or ""
+            sev_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(severity, "⚠️")
+            st.warning(f"{sev_badge} **{c['filename']}**  \n{reason}")
     else:
         st.success("ไม่พบความผิดปกติในการสนทนา")
 
@@ -285,9 +288,9 @@ for call in done_calls:
     if ap.get("overall_score"):
         agent_rows.append({
             "Filename": call["filename"],
-            "Politeness": ap.get("politeness", "—"),
-            "Problem Solving": ap.get("problem_solving", "—"),
-            "Next Action": ap.get("resolution_suggestion") or "—",
+            "Politeness": f"{ap.get('politeness', 0)} / 5",
+            "Problem Solving": f"{ap.get('problem_solving', 0)} / 5",
+            "Next Action": ap.get("next_action") or ap.get("resolution_suggestion") or "—",
             "Score": ap.get("overall_score", 0),
         })
 

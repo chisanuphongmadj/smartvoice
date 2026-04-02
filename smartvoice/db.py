@@ -107,6 +107,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("anomaly_detected",  "INTEGER DEFAULT 0"),
         ("anomaly_reason",    "TEXT"),
         ("processing_step",   "TEXT"),
+        ("sentiment_reason",  "TEXT"),
+        ("anomaly_severity",  "TEXT"),
     ]
     for col, col_type in new_cols:
         if col not in existing:
@@ -180,6 +182,8 @@ def update_call_results(
     platform_mentions: str = "",
     anomaly_detected: bool = False,
     anomaly_reason: str = "",
+    sentiment_reason: str = "",
+    anomaly_severity: str = "",
 ) -> None:
     now = datetime.utcnow().isoformat()
     conn = get_connection()
@@ -191,6 +195,7 @@ def update_call_results(
                 speaker_mapping = ?, agent_performance = ?, keywords = ?,
                 brand_mentions = ?, platform_mentions = ?,
                 anomaly_detected = ?, anomaly_reason = ?,
+                sentiment_reason = ?, anomaly_severity = ?,
                 status = 'done', updated_at = ?
             WHERE id = ?
             """,
@@ -199,6 +204,7 @@ def update_call_results(
                 speaker_mapping, agent_performance, keywords,
                 brand_mentions, platform_mentions,
                 int(anomaly_detected), anomaly_reason,
+                sentiment_reason, anomaly_severity,
                 now, call_id,
             ),
         )

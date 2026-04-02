@@ -22,7 +22,7 @@ def _normalize_llm_output(raw: str) -> str:
     return raw.strip()
 
 
-def chat(system_prompt: str, user_prompt: str) -> str:
+def chat(system_prompt: str, user_prompt: str, *, temperature: float = 0) -> str:
     url = f"{_base_url()}/api/chat"
     payload = {
         "model": _model(),
@@ -31,7 +31,7 @@ def chat(system_prompt: str, user_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "options": {"temperature": 0},
+        "options": {"temperature": temperature},
     }
     response = requests.post(url, json=payload, timeout=600)
     response.raise_for_status()
@@ -153,45 +153,129 @@ MAX_SEGMENTS = 60
 MAX_CHARS = 6000
 
 
-def analyze_transcript(conversation) -> dict:
-    from smartvoice.prompts import build_analysis_prompt
-
+def _prepare_conversation_text(conversation) -> str:
+    """Convert conversation list/str to capped text for LLM prompts."""
     if isinstance(conversation, list):
         segs = [item for item in conversation if item.get("text")][:MAX_SEGMENTS]
-        conversation_text = "\n".join(
+        text = "\n".join(
             f"{item.get('speaker', 'Unknown')}: {item.get('text', '')}"
             for item in segs
         )
     else:
-        conversation_text = str(conversation)
+        text = str(conversation)
+    if len(text) > MAX_CHARS:
+        text = text[:MAX_CHARS] + "\n...(ตัดบทสนทนาที่เกินมา)"
+    return text
 
-    # Hard cap on characters to avoid token overload
-    if len(conversation_text) > MAX_CHARS:
-        conversation_text = conversation_text[:MAX_CHARS] + "\n...(ตัดบทสนทนาที่เกินมา)"
 
-    system, user = build_analysis_prompt(conversation_text)
-    raw = chat(system, user)
-    result = extract_json(raw)
+def extract_summary_and_topics(conversation) -> dict:
+    """Call 1: Summary, Topic, Keywords, Brands, Platforms."""
+    from smartvoice.prompts import build_extraction_prompt
 
-    sentiment = result.get("customer_sentiment", result.get("sentiment", "neutral")).lower()
-    if sentiment not in ("positive", "neutral", "negative"):
-        sentiment = "neutral"
+    text = _prepare_conversation_text(conversation)
+    system, user = build_extraction_prompt(text)
+    try:
+        result = extract_json(chat(system, user))
+    except Exception:
+        result = {}
 
-    import json as _json
-    agent_perf = result.get("agent_performance", {})
     keywords = result.get("keywords", [])
     brand_mentions = result.get("brand_mentions", [])
     platform_mentions = result.get("platform_mentions", [])
 
     return {
         "summary": result.get("summary", ""),
-        "sentiment": sentiment,
         "topic": result.get("topic", ""),
-        "speaker_mapping": _json.dumps(result.get("speaker_mapping", {}), ensure_ascii=False),
-        "agent_performance": _json.dumps(agent_perf, ensure_ascii=False),
-        "keywords": _json.dumps(keywords, ensure_ascii=False),
-        "brand_mentions": _json.dumps(brand_mentions, ensure_ascii=False),
-        "platform_mentions": _json.dumps(platform_mentions, ensure_ascii=False),
+        "keywords": json.dumps(keywords if isinstance(keywords, list) else [], ensure_ascii=False),
+        "brand_mentions": json.dumps(brand_mentions if isinstance(brand_mentions, list) else [], ensure_ascii=False),
+        "platform_mentions": json.dumps(platform_mentions if isinstance(platform_mentions, list) else [], ensure_ascii=False),
+    }
+
+
+def analyze_sentiment(conversation) -> dict:
+    """Call 2: Aspect-based sentiment analysis."""
+    from smartvoice.prompts import build_sentiment_prompt
+
+    text = _prepare_conversation_text(conversation)
+    system, user = build_sentiment_prompt(text)
+    try:
+        result = extract_json(chat(system, user))
+    except Exception:
+        result = {}
+
+    sentiment = result.get("sentiment", "neutral").lower()
+    if sentiment not in ("positive", "neutral", "negative"):
+        sentiment = "neutral"
+
+    return {
+        "sentiment": sentiment,
+        "sentiment_reason": result.get("sentiment_reason", ""),
+    }
+
+
+def evaluate_agent_qa(conversation) -> dict:
+    """Call 3: SERVQUAL-inspired agent performance evaluation."""
+    from smartvoice.prompts import build_agent_qa_prompt
+
+    text = _prepare_conversation_text(conversation)
+    system, user = build_agent_qa_prompt(text)
+    try:
+        result = extract_json(chat(system, user, temperature=0.3))
+    except Exception:
+        result = {}
+
+    politeness = result.get("politeness", 3)
+    problem_solving = result.get("problem_solving", 3)
+    overall_score = result.get("overall_score", 0)
+    if not isinstance(politeness, (int, float)):
+        politeness = 3
+    if not isinstance(problem_solving, (int, float)):
+        problem_solving = 3
+    if not isinstance(overall_score, (int, float)):
+        overall_score = int(politeness) + int(problem_solving)
+
+    agent_perf = {
+        "politeness": int(politeness),
+        "problem_solving": int(problem_solving),
+        "overall_score": int(overall_score),
+        "next_action": result.get("next_action") or "ไม่มี — เคสปิดสมบูรณ์",
+        "strengths": result.get("strengths", []),
+        "improvements": result.get("improvements", []),
+    }
+    return {
+        "agent_performance": json.dumps(agent_perf, ensure_ascii=False),
+    }
+
+
+def detect_anomaly(conversation) -> dict:
+    """Call 4: Criteria-based anomaly detection."""
+    from smartvoice.prompts import build_anomaly_prompt
+
+    text = _prepare_conversation_text(conversation)
+    system, user = build_anomaly_prompt(text)
+    try:
+        result = extract_json(chat(system, user))
+    except Exception:
+        result = {}
+
+    return {
         "anomaly_detected": bool(result.get("anomaly_detected", False)),
         "anomaly_reason": result.get("anomaly_reason") or "",
+        "anomaly_severity": result.get("anomaly_severity") or "",
+    }
+
+
+def analyze_transcript(conversation) -> dict:
+    """Run all 4 analysis calls and merge results."""
+    extraction = extract_summary_and_topics(conversation)
+    sentiment = analyze_sentiment(conversation)
+    agent_qa = evaluate_agent_qa(conversation)
+    anomaly = detect_anomaly(conversation)
+
+    return {
+        **extraction,
+        **sentiment,
+        **agent_qa,
+        **anomaly,
+        "speaker_mapping": json.dumps({}, ensure_ascii=False),
     }
