@@ -43,3 +43,11 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "scb10x/llama3.1-typhoon2-8b-instruct")
 
 # ── Database ─────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "data/smartvoice.db")
+
+# ── Case Auto-Assignment ─────────────────────────────────────────────────
+# When a new call arrives from a customer who has an open case with a recent
+# sibling call (within this many hours), auto-attach WITHOUT asking the LLM.
+# This handles the common "customer called back 5 min later" / "dropped call
+# resumed" pattern, which LLM topic-matching misses when topics drift.
+# Set to 0 to disable the short-circuit and always use LLM matching.
+CASE_RECENCY_HOURS = _get_float("CASE_RECENCY_HOURS", "4.0")

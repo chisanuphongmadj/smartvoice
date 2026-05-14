@@ -30,6 +30,11 @@ TABLES = {
             ("",   "platform_mentions", "TEXT(JSON)"),
             ("",   "anomaly_detected", "INTEGER"),
             ("",   "anomaly_reason", "TEXT"),
+            ("",   "sentiment_reason", "TEXT"),
+            ("",   "anomaly_severity", "TEXT"),
+            ("",   "customer_phone", "TEXT"),
+            ("FK", "case_id", "INTEGER"),
+            ("",   "processing_step", "TEXT"),
             ("",   "status", "TEXT"),
             ("",   "created_at", "TEXT"),
             ("",   "updated_at", "TEXT"),
@@ -89,6 +94,20 @@ TABLES = {
             ("FK", "warranty_id", "INTEGER"),
             ("",   "matched_by", "TEXT"),
             ("",   "created_at", "TEXT"),
+        ],
+    },
+    "cases": {
+        "color": "#2a1a3a",
+        "header_color": "#a855f7",
+        "pos": (0.74, 0.68),
+        "width": 0.25,
+        "fields": [
+            ("PK", "id", "INTEGER"),
+            ("FK", "customer_id", "INTEGER"),
+            ("",   "subject", "TEXT"),
+            ("",   "status", "TEXT"),
+            ("",   "created_at", "TEXT"),
+            ("",   "updated_at", "TEXT"),
         ],
     },
 }
@@ -172,6 +191,8 @@ RELS = [
     ("customers", "call_customer_links", "1 : N\nlinked to"),
     ("calls", "call_customer_links", "1 : N\nlinked to"),
     ("warranty_registrations", "call_customer_links", "1 : N\nreferenced by"),
+    ("customers", "cases", "1 : N\nhas case"),
+    ("cases", "calls", "1 : N\ngroups calls"),
 ]
 
 arrow_props = dict(arrowstyle="-|>", color="#64748b", lw=1.5,
@@ -198,7 +219,8 @@ ax.legend(handles=legend_items, loc="lower right", fontsize=8,
           facecolor="#1e2130", edgecolor="#334155", labelcolor="white",
           framealpha=0.9)
 
-out_path = os.path.join(os.path.dirname(__file__), "er_diagram.png")
+out_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "er_diagram.png")
+os.makedirs(os.path.dirname(out_path), exist_ok=True)
 plt.tight_layout()
 plt.savefig(out_path, dpi=150, bbox_inches="tight",
             facecolor=fig.get_facecolor())

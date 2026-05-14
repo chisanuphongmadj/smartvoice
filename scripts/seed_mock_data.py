@@ -5,8 +5,9 @@ Run: .venv\Scripts\python.exe seed_mock_data.py
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(__file__))
-os.chdir(os.path.dirname(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _PROJECT_ROOT)
+os.chdir(_PROJECT_ROOT)
 
 from smartvoice import db
 

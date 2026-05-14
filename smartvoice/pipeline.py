@@ -2,8 +2,13 @@ import json
 import re
 import time
 import traceback
+from datetime import datetime, timedelta, timezone
 from smartvoice import db, ollama_client
+from smartvoice.config import CASE_RECENCY_HOURS
+from smartvoice.logger import get_logger
 from smartvoice.stt import transcribe_diarized as _transcribe_diarized
+
+log = get_logger(__name__)
 
 # Phrases that only an Agent (company rep) would say in Thai call centers
 _AGENT_MARKERS = [
@@ -17,6 +22,11 @@ _AGENT_MARKERS = [
     "อยู่นอกเหนือประกัน", "นอกเหนือประกัน", "โปรโมชั่นพิเศษสำหรับลูกค้า", "โปรราคาพิเศษ",
     "ไม่ถูกสุขลักษณะ",
     "ต้องขอแสดงความเสียใจ", "ขอแสดงความเสียใจ", "ไม่มี Trade-in", "ไม่มีเทรดอิน", "ตามนโยบาย",
+    # Domain-specific: agent self-references + company speak
+    "ทางเจ้าหน้าที่", "เจ้าหน้าที่ให้เขา", "ประสานงาน", "ระบบเรา", "ระบบของเรา",
+    "บริษัทเรา", "บริษัทปิด", "เปิดทำการ", "ตรวจสต๊อก", "ตรวจสอบระบบ",
+    "ขอตรวจสอบ", "ให้ดูเพิ่มเติม", "ดำเนินการ", "ไปส่งค่ะ", "ไปส่งนะคะ",
+    "คอนเฟิร์มวัน", "คอนเฟิร์มโทร", "โทรคอนเฟิร์ม", "แจ้งให้ทราบ",
 ]
 
 _AGENT_CLOSING_MARKERS = [
@@ -39,7 +49,68 @@ _CUSTOMER_MARKERS = [
     "อยู่ในเครือ", "สอบถามหน่อย", "ปกติที่ร้าน", "ถ้าจะส่งกลับ", "ประกันหรือเปล่า",
     "โครงสร้างใช่ไหม", "ถูกต้องไหม", "วางแผนต่อไป", "Trade-in เหมือนสินค้าชนิดอื่นไหม",
     "ทางบริษัทมี Trade-in",
+    # Domain-specific: customer self-reference "พี่" + action verbs
+    "พี่ก็สะดวก", "พี่สะดวก", "พี่ก็ได้", "พี่ได้นะ", "พี่เลือก", "พี่ขอ",
+    "พี่ให้ไว้", "พี่เซฟไว้", "พี่เมม", "พี่ติด", "พี่นัดไว้", "พี่เลื่อน",
+    "พี่เอง", "พี่ก็ไม่", "พี่เหมือน", "พี่จะบอก", "พี่เนี่ย", "พี่ดูปฏิทิน",
+    # Customer-direct-request patterns
+    "ขอเลื่อน", "ขอเลือกวัน", "ติดตามเรื่อง", "จะขอเลือก", "ไม่สะดวก",
+    "ไม่สามารถเข้าไป", "ติดประชุม", "ลางาน", "เปิดบ้าน", "รับสินค้า",
+    "ให้ไว้สองเบอร์", "ให้ไว้อีกเบอร์",
+    # Customer (elder) addressing agent (younger) by vocatives
+    "ได้ไหมลูก", "ได้ไหมหนู", "นะลูก", "ค่ะลูก", "อ่ะลูก", "จ๊ะลูก",
+    "ยังไงลูก", "นะน้อง", "อยู่นะคะน้อง", "ค่ะน้อง", "พลอยจ๋า", "พลอยจ้า",
 ]
+
+# ---------------------------------------------------------------------------
+# Strong-cue regex patterns — high-confidence speaker indicators used by
+# `_aggressive_relabel_from_strong_cues` to override LLM decisions.
+#
+# Design rationale
+# ----------------
+# The LLM `correct_speakers` step is conservative and occasionally preserves
+# Pyannote's wrong labels on mega-segments. Rather than trust the LLM alone,
+# we apply deterministic domain rules after it runs: if a text chunk contains
+# an unambiguous cue (e.g. customer self-refers as "พี่ก็สะดวก" or vocatively
+# addresses the agent as "ลูก"), we force the correct label.
+# ---------------------------------------------------------------------------
+
+# Word-boundary sensitive: "พี่" must be followed by an action verb (not name).
+# Matches "พี่ก็", "พี่จะ", "พี่สะดวก", …
+_CUSTOMER_STRONG_RE = re.compile(
+    r"(?:"
+    r"พี่(?:ก็|จะ|สะดวก|ได้|เลือก|ให้ไว้|เซฟ|เมม|เลื่อน|ติด|ขอ|เอง|นัดไว้|เนี่ย|เหมือน|ดูปฏิทิน|จะบอก)"
+    r"|ได้ไหม(?:ลูก|หนู)"
+    r"|(?:นะ|ค่ะ|อ่ะ|จ๊ะ|ยังไง)ลูก(?:\s|$)"
+    r"|(?:นะ|ค่ะ)น้อง(?:\s|$)"
+    r"|อยู่นะคะน้อง"
+    r"|พลอยจ๋า|พลอยจ้า"
+    r"|ขอเลื่อน(?:วัน|นัด)?"
+    r"|ขอเลือกวันรับ"
+    r"|ติดตามเรื่อง(?:การ)?ส่ง"
+    r"|ติดประชุม|ลางาน|เปิดบ้าน"
+    r"|ไม่สามารถเข้า(?:ไป|รับ)"
+    r"|ให้ไว้(?:สอง|อีก)เบอร์"
+    r")"
+)
+
+# Agent self-name "พลอย" or STT variants, plus unambiguous company speak
+_AGENT_STRONG_RE = re.compile(
+    r"(?:"
+    r"พลอย(?:ขอ|ดู|ระบุ|เกรง|ไม่แน่ใจ|จะได้|อาจ|จ๋า)?"
+    r"|พอย(?:ขอ|ดู|ระบุ|เกรง|ไม่แน่ใจ|จะได้|อาจ)"
+    r"|คุณลูกค้า"
+    r"|ทาง(?:บริษัท|เรา|เจ้าหน้าที่)"
+    r"|ระบบ(?:เรา|ของเรา)"
+    r"|กลุ่มบริษัทที่นอน"
+    r"|ขอบคุณที่ติดต่อ"
+    r"|ยินดีให้บริการ"
+    r"|ขอบพระคุณ(?:ค่ะ|ครับ)"
+    r"|คอนเฟิร์ม(?:วัน|โทร)"
+    r"|ตรวจ(?:สอบระบบ|สต๊อก|สอบให้)"
+    r"|บริษัท(?:เรา|ปิด|เปิดทำการ)"
+    r")"
+)
 
 _DOMAIN_NORMALIZATIONS = [
     (re.compile(r"เลสเทอร์นิ[กค]ซ์|เลสโทนิ[กค]|เรสโทนิ[กค]|เรสโทนิก|เลสโทรนิก", re.IGNORECASE), "Restonic"),
@@ -550,6 +621,186 @@ def _split_opening_mixed_turns(conversation: list[dict]) -> list[dict]:
         })
     return output
 
+
+# Thai sentence-ending particles + English '?' act as boundaries.
+# The lookahead `(?=\s)` ensures we only split when STT recorded a pause/space
+# after the particle, which is a reliable proxy for an actual prosodic break.
+# Pattern order matters — longer particles first so "นะคะ" is not chopped as "นะ" + "คะ".
+_SENTENCE_END_RE = re.compile(
+    r"(?P<end>นะคะ|นะครับ|ไหมคะ|ไหมครับ|เหรอคะ|เหรอครับ|ใช่ไหม|ใช่มั้ย"
+    r"|ค่ะ|คะ|ครับ|คับ|จ๊ะ|จ้ะ|เหรอ|หรอ|นะ|\?)(?=\s)"
+)
+
+# Thai turn-initial discourse markers — act as split points when preceded by space.
+# Used as a fallback when no polite-particle boundary exists in a long sentence.
+# Restricted to high-confidence turn-change interjections/address terms to avoid
+# false-splitting on common continuations like "แต่"/"เพราะ" that occur mid-turn.
+_SENTENCE_START_RE = re.compile(
+    r"\s(?=อ้าว|อ๋อ|เอ๊ะ|โอเค|คุณลูกค้า|พี่ขอ|หนูถ้า|พี่ก็|พี่สะดวก|ได้เลยค่ะ|ได้ค่ะ)"
+)
+
+# Only split segments longer than this — shorter ones are probably already
+# a single coherent turn and re-splitting would fragment the flow.
+_MIN_CHARS_FOR_SPLIT = 160
+# If a single sentence after the primary split still exceeds this length,
+# apply the turn-initial-marker fallback split inside it. Lowered from 180 to 80
+# so that short mixed-speaker clauses ("คุณลูกค้า อ้าวไม่ใช่...") also get split.
+_HARD_CHUNK_MAX_CHARS = 80
+# Group every N sentences into one sub-segment so we don't fire correct_speakers
+# on dozens of trivial chunks like "ค่ะ".
+_SENTENCES_PER_CHUNK = 2
+
+
+def _split_long_segments_by_sentence(conversation: list[dict]) -> list[dict]:
+    """Split very long segments at Thai sentence boundaries.
+
+    Rationale
+    ---------
+    Pyannote occasionally merges multiple speaker turns into a single
+    segment (e.g. when two speakers share similar voice characteristics).
+    The downstream LLM `correct_speakers` step supports a `parts` split, but
+    empirically struggles to find accurate split points in very long
+    segments — it tends to rubber-stamp the existing label.
+
+    By pre-splitting long segments at polite-particle boundaries ("ค่ะ ",
+    "ครับ ", "นะคะ ", "?", …) we give the LLM a much simpler per-chunk
+    classification task. Timestamps are allocated proportionally to
+    character length so timeline ordering is preserved.
+
+    Speaker label is kept identical across all sub-chunks (we trust
+    `correct_speakers` to re-label them).
+    """
+    if not conversation:
+        return conversation
+
+    output: list[dict] = []
+    for item in conversation:
+        text = (item.get("text") or "").strip()
+        if len(text) < _MIN_CHARS_FOR_SPLIT:
+            output.append(item)
+            continue
+
+        # Find all sentence-boundary positions (end index, exclusive)
+        boundaries = [m.end() for m in _SENTENCE_END_RE.finditer(text)]
+        if not boundaries:
+            output.append(item)
+            continue
+
+        # Slice text into sentences using the boundaries
+        raw_sentences: list[str] = []
+        prev = 0
+        for b in boundaries:
+            piece = text[prev:b].strip()
+            if piece:
+                raw_sentences.append(piece)
+            prev = b
+        tail = text[prev:].strip()
+        if tail:
+            raw_sentences.append(tail)
+
+        # Fallback: any sentence still exceeding _HARD_CHUNK_MAX_CHARS is
+        # split further at turn-initial discourse markers (อ้าว, อ๋อ, …).
+        sentences: list[str] = []
+        for s in raw_sentences:
+            if len(s) <= _HARD_CHUNK_MAX_CHARS:
+                sentences.append(s)
+                continue
+            split_points = [m.start() for m in _SENTENCE_START_RE.finditer(s)]
+            if not split_points:
+                sentences.append(s)
+                continue
+            cursor = 0
+            for sp in split_points:
+                piece = s[cursor:sp].strip()
+                if piece:
+                    sentences.append(piece)
+                cursor = sp
+            trailing = s[cursor:].strip()
+            if trailing:
+                sentences.append(trailing)
+
+        if len(sentences) <= 1:
+            output.append(item)
+            continue
+
+        # Group every _SENTENCES_PER_CHUNK sentences into one chunk
+        chunks: list[str] = []
+        for i in range(0, len(sentences), _SENTENCES_PER_CHUNK):
+            chunk = " ".join(sentences[i:i + _SENTENCES_PER_CHUNK]).strip()
+            if chunk:
+                chunks.append(chunk)
+
+        if len(chunks) <= 1:
+            output.append(item)
+            continue
+
+        # Allocate time proportionally to character length
+        start = float(item.get("start", 0) or 0)
+        end = float(item.get("end", start) or start)
+        duration = max(end - start, 0.0)
+        total_chars = sum(len(c) for c in chunks)
+
+        cursor = start
+        for idx, chunk in enumerate(chunks):
+            if idx == len(chunks) - 1:
+                # Ensure the last chunk lands exactly on the original end
+                chunk_end = end
+            elif duration > 0 and total_chars > 0:
+                chunk_end = cursor + duration * (len(chunk) / total_chars)
+            else:
+                chunk_end = cursor
+            output.append({
+                **item,
+                "text": chunk,
+                "start": cursor,
+                "end": chunk_end,
+            })
+            cursor = chunk_end
+    return output
+
+
+def _aggressive_relabel_from_strong_cues(conversation: list[dict]) -> list[dict]:
+    """Force-re-label segments whose text contains an unambiguous domain cue.
+
+    Applied after LLM `correct_speakers` to catch cases where the model was too
+    conservative (e.g. kept a whole mega-segment labelled "Agent" even though
+    it clearly contains customer self-references like "พี่สะดวก" or vocatives
+    like "ได้ไหมลูก").
+
+    Rules
+    -----
+    1. If text matches _CUSTOMER_STRONG_RE AND does NOT match _AGENT_STRONG_RE
+       → force "Customer".
+    2. If text matches _AGENT_STRONG_RE AND does NOT match _CUSTOMER_STRONG_RE
+       → force "Agent".
+    3. If BOTH match → the segment is mixed; leave as-is (another splitter can
+       handle it, or we defer to the LLM's original decision).
+    4. If NEITHER matches → leave as-is.
+    """
+    if not conversation:
+        return conversation
+
+    result: list[dict] = []
+    for item in conversation:
+        text = (item.get("text") or "").strip()
+        if not text:
+            result.append(item)
+            continue
+
+        has_customer = bool(_CUSTOMER_STRONG_RE.search(text))
+        has_agent = bool(_AGENT_STRONG_RE.search(text))
+
+        new_item = dict(item)
+        if has_customer and not has_agent:
+            new_item["speaker"] = "Customer"
+        elif has_agent and not has_customer:
+            new_item["speaker"] = "Agent"
+        # else: mixed or no cue — keep existing label
+
+        result.append(new_item)
+    return result
+
+
 def _split_mixed_question_answer_turns(conversation: list[dict]) -> list[dict]:
     if not conversation:
         return conversation
@@ -970,6 +1221,98 @@ def _split_mixed_closing_turns(conversation: list[dict]) -> list[dict]:
         })
     return output
 
+def _parse_iso(ts: str | None) -> datetime | None:
+    """Parse an ISO timestamp string, tolerating naive timestamps (assumed UTC)."""
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _auto_assign_case(call_id: int, analysis: dict) -> None:
+    """After analysis, attach this call to an existing case or create a new one.
+
+    Strategy (in order of preference):
+      1. **Recency short-circuit** — if the customer has an open case whose
+         most-recent call is within CASE_RECENCY_HOURS, attach to that case
+         without consulting the LLM. Consecutive calls from the same customer
+         (dropped call, follow-up, call-back) are almost always the same case
+         even when the topic drifts.
+      2. **LLM matching** — for older open cases, ask the LLM to match by
+         topic/summary, with recency info included in the prompt.
+      3. **New case** — if no match, create a new case.
+    """
+    try:
+        link = db.get_call_customer_link(call_id)
+        if not link:
+            return  # No customer linked — skip case assignment
+
+        customer_id = link["customer_id"]
+        new_topic = analysis.get("topic", "")
+        new_summary = analysis.get("summary", "")
+
+        open_cases = db.get_open_cases_by_customer(customer_id)
+
+        # No open cases → create one directly (no LLM needed)
+        if not open_cases:
+            subject = new_topic or new_summary[:60] or "เรื่องทั่วไป"
+            case_id = db.create_case(customer_id, subject)
+            db.assign_call_to_case(call_id, case_id)
+            return
+
+        # Enrich cases with: (a) call summaries for LLM context
+        # (b) latest_call_at for recency short-circuit + LLM context
+        call = db.get_call_by_id(call_id)
+        call_dt = _parse_iso(call.get("created_at") if call else None)
+
+        for cs in open_cases:
+            case_calls = db.get_calls_by_case(cs["id"])
+            summaries = [c.get("summary", "")[:120] for c in case_calls if c.get("summary")]
+            cs["call_summaries"] = " | ".join(summaries) if summaries else "-"
+            cs["latest_call_at"] = db.latest_call_time_in_case(cs["id"])
+
+        # (1) Recency short-circuit — attach to the most-recently-updated
+        # open case if the time gap is within the configured window.
+        if CASE_RECENCY_HOURS > 0 and call_dt is not None:
+            window = timedelta(hours=CASE_RECENCY_HOURS)
+            for cs in open_cases:
+                latest_dt = _parse_iso(cs.get("latest_call_at"))
+                if latest_dt is None:
+                    continue
+                gap = abs((call_dt - latest_dt).total_seconds())
+                if gap <= window.total_seconds():
+                    log.info(
+                        "Auto-merge: call_id=%s → case #%s "
+                        "(same customer, %.1f min since last call)",
+                        call_id, cs["id"], gap / 60.0,
+                    )
+                    db.assign_call_to_case(call_id, cs["id"])
+                    db.update_case_status(cs["id"], "follow_up")
+                    return
+
+        # (2) LLM matching — for cases older than the recency window
+        result = ollama_client.match_case(new_topic, new_summary, open_cases)
+        matched_id = result.get("match_case_id")
+        valid_ids = {cs["id"] for cs in open_cases}
+        if matched_id and matched_id in valid_ids:
+            db.assign_call_to_case(call_id, matched_id)
+            db.update_case_status(matched_id, "follow_up")
+            return
+
+        # (3) New case
+        subject = result.get("suggested_subject") or new_topic or "เรื่องทั่วไป"
+        case_id = db.create_case(customer_id, subject)
+        db.assign_call_to_case(call_id, case_id)
+    except Exception:
+        # Case assignment is non-critical — log but don't break the pipeline
+        log.exception("_auto_assign_case failed for call_id=%s", call_id)
+
+
 def process_call(call_id: int, step_callback=None) -> dict:
     call = db.get_call_by_id(call_id)
     if not call:
@@ -1065,8 +1408,17 @@ def process_call(call_id: int, step_callback=None) -> dict:
         conversation = _drop_redundant_opening_segments(conversation)
         conversation = _drop_adjacent_duplicate_segments(conversation)
 
+        # Pre-split any remaining long segments at Thai sentence boundaries so
+        # correct_speakers only has to classify short, single-turn chunks
+        # instead of finding split points inside multi-speaker mega-segments.
+        conversation = _split_long_segments_by_sentence(conversation)
+
         _step("🗣️ [3/4] กำลังแก้ Speaker Turn ที่ปนกันด้วย AI...")
         conversation = ollama_client.correct_speakers(conversation)
+        # Aggressive deterministic override — catches cases where the LLM was
+        # too conservative and kept Pyannote's wrong label on segments with
+        # unambiguous domain cues (e.g. "พี่ก็สะดวก", "ได้ไหมลูก", "พลอยขอ").
+        conversation = _aggressive_relabel_from_strong_cues(conversation)
         conversation = _sort_conversation(conversation)
         conversation = _split_opening_mixed_turns(conversation)
         conversation = _split_answer_prefixed_turns(conversation)
@@ -1078,10 +1430,16 @@ def process_call(call_id: int, step_callback=None) -> dict:
         conversation = _split_leading_agent_continuation_turns(conversation)
         conversation = _split_mixed_closing_turns(conversation)
         conversation = _stabilize_sandwiched_turns(conversation)
+        conversation = _aggressive_relabel_from_strong_cues(conversation)
         conversation = _merge_adjacent_same_speaker(conversation)
         conversation = _enforce_role_rules(conversation)
         conversation = ollama_client.cleanup_transcript(conversation)
         conversation = _sort_conversation(conversation)
+        # Also pre-split long merged segments before the 2nd splitter pass so
+        # the splitters (which rely on pattern matching at segment start/end)
+        # can see turn boundaries inside mega-chunks.
+        conversation = _split_long_segments_by_sentence(conversation)
+        conversation = _aggressive_relabel_from_strong_cues(conversation)
         conversation = _split_opening_mixed_turns(conversation)
         conversation = _split_answer_prefixed_turns(conversation)
         conversation = _split_embedded_agent_answer_turns(conversation)
@@ -1092,6 +1450,7 @@ def process_call(call_id: int, step_callback=None) -> dict:
         conversation = _split_leading_agent_continuation_turns(conversation)
         conversation = _split_mixed_closing_turns(conversation)
         conversation = _stabilize_sandwiched_turns(conversation)
+        conversation = _aggressive_relabel_from_strong_cues(conversation)
         conversation = _merge_adjacent_same_speaker(conversation)
         conversation = _enforce_role_rules(conversation)
         conversation = _apply_domain_normalization(conversation)
@@ -1156,6 +1515,10 @@ def process_call(call_id: int, step_callback=None) -> dict:
             anomaly_severity=analysis.get("anomaly_severity", ""),
         )
 
+        # ── Auto Case Assignment ──
+        _step("📂 กำลังจัดกลุ่มเคส...")
+        _auto_assign_case(call_id, analysis)
+
         elapsed = time.time() - _start
         elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{int(elapsed)}s"
         _step(f"✅ เสร็จสิ้น ใช้เวลา {elapsed_str}")
@@ -1171,5 +1534,6 @@ def process_call(call_id: int, step_callback=None) -> dict:
 
     except Exception as exc:
         error_msg = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+        log.exception("process_call failed for call_id=%s", call_id)
         db.update_call_status(call_id, "error", error_msg=error_msg)
         raise

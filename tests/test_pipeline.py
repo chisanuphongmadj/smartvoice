@@ -1,12 +1,14 @@
 import unittest
 
 from smartvoice.pipeline import (
+    _aggressive_relabel_from_strong_cues,
     _enforce_role_rules,
     _merge_adjacent_same_speaker,
     _split_answer_prefixed_turns,
     _split_embedded_customer_reaction_turns,
     _split_followup_question_turns,
     _split_leading_agent_continuation_turns,
+    _split_long_segments_by_sentence,
     _split_mixed_question_answer_turns,
     _split_opening_mixed_turns,
     _split_trailing_customer_question_turns,
@@ -211,6 +213,140 @@ class TestPipelineTurnHeuristics(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertIn("ใช่ค่ะ", result[0]["text"])
         self.assertIn("จะแห้งแค่ข้างนอก", result[0]["text"])
+
+
+class TestSplitLongSegmentsBySentence(unittest.TestCase):
+    def test_short_segment_is_not_split(self):
+        conv = [{"speaker": "Agent", "text": "สวัสดีค่ะ", "start": 0.0, "end": 1.0}]
+        self.assertEqual(_split_long_segments_by_sentence(conv), conv)
+
+    def test_empty_conversation_is_noop(self):
+        self.assertEqual(_split_long_segments_by_sentence([]), [])
+
+    def test_mega_segment_splits_at_sentence_boundaries(self):
+        # Long segment containing multiple turns with polite-particle boundaries
+        text = (
+            "คุณสุกิตนะคะ ใช่ค่ะ เหมือนของคุณลูกค้ามีเรื่องส่งไว้ไหมคะ "
+            "เพราะว่าที่พอดูจากในระบบเหมือนจะมีโรงส่งไว้วันที่ 2 มกราเลยอะค่ะ "
+            "ทีเนี้ยแต่ 2 มกราก็จะไม่มีคนมันอยู่นะคะน้อง"
+        )
+        conv = [{"speaker": "Agent", "text": text, "start": 10.0, "end": 40.0}]
+
+        result = _split_long_segments_by_sentence(conv)
+
+        # Must produce multiple chunks
+        self.assertGreater(len(result), 1)
+        # Speaker label is preserved across all chunks (correct_speakers will re-label)
+        self.assertTrue(all(r["speaker"] == "Agent" for r in result))
+        # Timing bounds are preserved
+        self.assertAlmostEqual(result[0]["start"], 10.0)
+        self.assertAlmostEqual(result[-1]["end"], 40.0)
+        # Chunks are time-ordered without overlap
+        for i in range(len(result) - 1):
+            self.assertLessEqual(result[i]["end"], result[i + 1]["start"] + 1e-6)
+        # No chunk exceeds roughly the original length
+        self.assertLessEqual(max(len(r["text"]) for r in result), len(text))
+
+    def test_segment_without_boundary_particles_is_not_split(self):
+        # Long segment but no polite particles followed by space → no split
+        text = "ก" * 300
+        conv = [{"speaker": "Agent", "text": text, "start": 0.0, "end": 10.0}]
+
+        result = _split_long_segments_by_sentence(conv)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["text"], text)
+
+    def test_text_content_is_preserved(self):
+        text = (
+            "สวัสดีค่ะ กลุ่มบริษัทที่นอนในเครือโลตัสค่ะ "
+            "จะเรียกยังไงค่ะ ติดตามเรื่องการส่งที่นอนค่ะ "
+            "ได้เลยค่ะ ขอตรวจสอบสักครู่นะคะ"
+        )
+        conv = [{"speaker": "Agent", "text": text, "start": 0.0, "end": 15.0}]
+
+        result = _split_long_segments_by_sentence(conv)
+
+        # Reconstruct text from chunks — should contain all original content
+        reconstructed = " ".join(r["text"] for r in result)
+        # Every original word should appear in reconstructed
+        for word in text.split():
+            self.assertIn(word, reconstructed)
+
+
+class TestAggressiveRelabelFromStrongCues(unittest.TestCase):
+    def test_customer_self_reference_flips_to_customer(self):
+        # Wrongly labelled Agent, but text has "พี่สะดวก" → must flip to Customer
+        conv = [{"speaker": "Agent", "text": "พี่สะดวกวันที่ 8 นี้ พี่ลางานไปเปิดบ้าน", "start": 0, "end": 5}]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Customer")
+
+    def test_customer_vocative_luk_flips_to_customer(self):
+        # "ได้ไหมลูก" — customer addressing young agent → flip to Customer
+        conv = [{"speaker": "Agent", "text": "หนูถ้าเป็นอังคารได้ไหมลูก วันอังคาร", "start": 0, "end": 3}]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Customer")
+
+    def test_agent_self_name_ploi_flips_to_agent(self):
+        # "พลอยขอ..." — agent using their own name → flip to Agent
+        conv = [{"speaker": "Customer", "text": "งั้นเดี๋ยวพลอยขอระบุในระบบนะคะ", "start": 0, "end": 4}]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Agent")
+
+    def test_company_speak_flips_to_agent(self):
+        conv = [{"speaker": "Customer", "text": "เบอร์ที่คุณลูกค้าโทรเข้ามาใช่ไหมคะ", "start": 0, "end": 3}]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Agent")
+
+    def test_customer_request_verb_flips_to_customer(self):
+        conv = [{"speaker": "Agent", "text": "ติดตามเรื่องการส่งที่นอนที่สั่งไว้ค่ะ", "start": 0, "end": 3}]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Customer")
+
+    def test_mixed_cues_leaves_label_unchanged(self):
+        # Text has both customer and agent cues → keep as-is (let splitter handle)
+        conv = [{
+            "speaker": "Agent",
+            "text": "พี่สะดวกวันที่ 8 นะคะ คุณลูกค้า",
+            "start": 0,
+            "end": 3,
+        }]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Agent")  # unchanged
+
+    def test_no_cue_leaves_label_unchanged(self):
+        conv = [{"speaker": "Agent", "text": "ค่ะ โอเค", "start": 0, "end": 1}]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Agent")
+
+    def test_empty_conversation_is_noop(self):
+        self.assertEqual(_aggressive_relabel_from_strong_cues([]), [])
+
+    def test_correctly_labeled_segments_not_changed(self):
+        # Already correctly labeled — should stay the same
+        conv = [
+            {"speaker": "Agent", "text": "สวัสดีค่ะ กลุ่มบริษัทที่นอนในเครือโลตัสค่ะ", "start": 0, "end": 2},
+            {"speaker": "Customer", "text": "พี่สะดวกวันที่ 8 ค่ะ", "start": 2, "end": 4},
+        ]
+
+        result = _aggressive_relabel_from_strong_cues(conv)
+
+        self.assertEqual(result[0]["speaker"], "Agent")
+        self.assertEqual(result[1]["speaker"], "Customer")
 
 
 if __name__ == "__main__":

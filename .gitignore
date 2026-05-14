@@ -18,8 +18,15 @@ env/
 # Converted CTranslate2 models (large, regenerated on first run)
 data/models/
 
+# Runtime logs
+data/logs/
+
 # Docs output
 docs/er_diagram.png
+
+# Build artifacts
+smartvoice.egg-info/
+*.egg-info/
 
 # OS
 .DS_Store

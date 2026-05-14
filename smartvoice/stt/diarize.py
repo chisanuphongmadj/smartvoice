@@ -118,10 +118,16 @@ def diarize_words(file_path: str, all_words: list[dict], log_fn) -> list[dict]:
                 token=HF_TOKEN,
             )
             _diar_pipeline = _diar_pipeline.to(torch.device(device))
+        # Call-center audio is always 2-party (agent + customer). Constrain
+        # the diarizer so it doesn't collapse two similar-sounding speakers
+        # into one cluster, which empirically yields ~28 coarse segments for
+        # a 4-min call vs. ~50+ when bounded to 2 speakers. If the call turns
+        # out to be effectively mono (e.g. voicemail), min_speakers=1 keeps
+        # a graceful fallback.
         diarization = _diar_pipeline({
             "waveform": waveform_tensor,
             "sample_rate": sample_rate,
-        })
+        }, min_speakers=1, max_speakers=2)
         log_fn("← Diarization เสร็จ")
     except Exception as e:
         log_fn(f"⚠ Diarization ล้มเหลว ({e}) — ใช้ Speaker 0 ทั้งหมด")

@@ -11,7 +11,7 @@
 |---|---|
 | DBMS | SQLite 3 (Local) / PostgreSQL (Cloud-ready) |
 | ประเภท | Relational Database |
-| จำนวน Table | 4 |
+| จำนวน Table | 5 |
 | Encoding | UTF-8 |
 | Timezone | UTC (stored as ISO 8601 TEXT) |
 
@@ -77,9 +77,22 @@ erDiagram
         TEXT platform_mentions
         INTEGER anomaly_detected
         TEXT anomaly_reason
+        TEXT sentiment_reason
+        TEXT anomaly_severity
+        TEXT customer_phone
+        INTEGER case_id FK
         TEXT processing_step
         TEXT status
         TEXT error_msg
+        TEXT created_at
+        TEXT updated_at
+    }
+
+    cases {
+        INTEGER id PK
+        INTEGER customer_id FK
+        TEXT subject
+        TEXT status
         TEXT created_at
         TEXT updated_at
     }
@@ -95,6 +108,8 @@ erDiagram
 
     customers ||--o{ warranty_registrations : "ลงทะเบียนรับประกัน"
     customers ||--o{ call_customer_links : "มี"
+    customers ||--o{ cases : "มีเคส"
+    cases ||--o{ calls : "จัดกลุ่มสาย"
     calls ||--o{ call_customer_links : "เชื่อมกับ"
     warranty_registrations ||--o{ call_customer_links : "อ้างอิง"
 ```
@@ -122,6 +137,10 @@ erDiagram
 | `platform_mentions` | TEXT (JSON) | NULL | แพลตฟอร์มที่พูดถึง เช่น `["Shopee","Lazada"]` |
 | `anomaly_detected` | INTEGER | DEFAULT 0 | 1 = พบพฤติกรรมผิดปกติ, 0 = ปกติ |
 | `anomaly_reason` | TEXT | NULL | อธิบายประเภทความผิดปกติที่พบ |
+| `sentiment_reason` | TEXT | NULL | เหตุผลประกอบการวิเคราะห์ sentiment |
+| `anomaly_severity` | TEXT | NULL | ระดับความรุนแรงของ anomaly (low/medium/high) |
+| `customer_phone` | TEXT | NULL | เบอร์ลูกค้าที่ดึงจากชื่อไฟล์อัตโนมัติ |
+| `case_id` | INTEGER | FK → cases(id), NULL | รหัสเคสที่สายนี้ถูกจัดกลุ่มไว้ |
 | `processing_step` | TEXT | NULL | ขั้นตอนการประมวลผลปัจจุบัน (แสดงใน UI) |
 | `status` | TEXT | CHECK(uploaded\|processing\|done\|error) | สถานะการประมวลผล |
 | `error_msg` | TEXT | NULL | ข้อความ error (ถ้ามี) |
@@ -186,8 +205,21 @@ erDiagram
 | `call_id` | INTEGER | NOT NULL, FK → calls(id) ON DELETE CASCADE | รหัสการโทร |
 | `customer_id` | INTEGER | NOT NULL, FK → customers(id) | รหัสลูกค้า |
 | `warranty_id` | INTEGER | FK → warranty_registrations(id), NULL | รหัสทะเบียนรับประกัน (ถ้าระบุได้) |
-| `matched_by` | TEXT | DEFAULT 'manual' | วิธี match: manual / phone / llm |
+| `matched_by` | TEXT | DEFAULT 'manual' | วิธี match: `manual` (เชื่อมด้วยมือ) / `auto_phone` (เชื่อมอัตโนมัติจากเบอร์ในชื่อไฟล์) |
 | `created_at` | TEXT | NOT NULL | วันเวลาที่สร้าง link (ISO 8601 UTC) |
+
+---
+
+### 3.5 Table: `cases` — เคส (กลุ่มการโทรเรื่องเดียวกัน)
+
+| Column | Data Type | Constraint | คำอธิบาย |
+|---|---|---|---|
+| `id` | INTEGER | PK, AUTOINCREMENT | รหัสเคสอัตโนมัติ |
+| `customer_id` | INTEGER | FK → customers(id) | รหัสลูกค้าเจ้าของเคส |
+| `subject` | TEXT | NOT NULL | หัวข้อเคส เช่น "สอบถามประกันน้ำท่วม" |
+| `status` | TEXT | CHECK(open\|follow_up\|closed) | สถานะเคส: เปิด/ติดตาม/ปิด |
+| `created_at` | TEXT | NOT NULL | วันเวลาที่สร้างเคส (ISO 8601 UTC) |
+| `updated_at` | TEXT | NOT NULL | วันเวลาที่อัปเดตล่าสุด (ISO 8601 UTC) |
 
 ---
 
@@ -197,6 +229,8 @@ erDiagram
 |---|---|---|
 | customers → warranty_registrations | 1 : N | ลูกค้า 1 คน มีหลาย warranty ได้ |
 | customers → call_customer_links | 1 : N | ลูกค้า 1 คน เชื่อมกับหลาย call ได้ |
+| customers → cases | 1 : N | ลูกค้า 1 คน มีได้หลายเคส |
+| cases → calls | 1 : N | 1 เคส จัดกลุ่มได้หลายสาย (case_id) |
 | calls → call_customer_links | 1 : N | 1 call อาจเชื่อมกับลูกค้าได้ |
 | warranty_registrations → call_customer_links | 1 : N | 1 warranty อ้างอิงได้จากหลาย call |
 
@@ -219,7 +253,7 @@ erDiagram
 | Field | ตัวอย่างค่า |
 |---|---|
 | `speaker_mapping` | `{"SPEAKER_00": "Agent", "SPEAKER_01": "Customer"}` |
-| `agent_performance` | `{"politeness": "ดี", "problem_solving": "แก้ไขได้", "overall_score": 8}` |
+| `agent_performance` | `{"politeness": 5, "problem_solving": 4, "overall_score": 9, "next_action": "ติดตามเรื่อง...", "next_action_owner": "Agent คนเดิม", "strengths": [...], "improvements": [...]}` |
 | `keywords` | `["ที่นอน", "คืนสินค้า", "ชำรุด"]` |
 | `brand_mentions` | `["Omazz", "Dunlopillo"]` |
 | `platform_mentions` | `["Shopee", "Lazada"]` |

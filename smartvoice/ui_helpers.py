@@ -1,12 +1,14 @@
 """Shared UI helpers for Streamlit pages — CSS, badges, processing launchers."""
 
-import os
 import threading
 
 import streamlit as st
 
 from smartvoice import db, pipeline
 from smartvoice.config import WHISPER_MODEL, OLLAMA_MODEL, MOCK_STT
+from smartvoice.logger import get_logger
+
+log = get_logger(__name__)
 
 # ── Shared CSS ───────────────────────────────────────────────────────────
 
@@ -106,6 +108,51 @@ def inject_css():
     st.markdown(f"<style>{_CSS}</style>", unsafe_allow_html=True)
 
 
+# ── Simple staff login (no password — captures who did what for audit log) ──
+
+STAFF_ROLES = ["Admin", "Supervisor", "Agent", "QA"]
+
+
+def render_login_widget():
+    """Render a lightweight login at the top of the sidebar.
+
+    Captures `current_user` (name) + `current_user_role` into session state.
+    No password — this is an **audit-trail** feature, not security. For a
+    hardened multi-tenant deployment, replace with proper auth (e.g.
+    streamlit-authenticator + hashed credentials).
+    """
+    with st.sidebar:
+        user = st.session_state.get("current_user")
+        role = st.session_state.get("current_user_role")
+
+        if user:
+            st.success(f"👤 **{user}**  \n_{role}_")
+            if st.button("🚪 Logout", use_container_width=True, key="_logout_btn"):
+                st.session_state.pop("current_user", None)
+                st.session_state.pop("current_user_role", None)
+                st.rerun()
+        else:
+            st.markdown("### 🔑 เข้าสู่ระบบ")
+            name = st.text_input("ชื่อ-นามสกุล", key="_login_name", placeholder="เช่น สุภาพร จันทร์แก้ว")
+            role_pick = st.selectbox("บทบาท", STAFF_ROLES, key="_login_role")
+            if st.button("✅ Login", use_container_width=True, key="_login_btn"):
+                name_clean = (name or "").strip()
+                if not name_clean:
+                    st.error("กรุณาใส่ชื่อ")
+                else:
+                    st.session_state["current_user"] = name_clean
+                    st.session_state["current_user_role"] = role_pick
+                    st.rerun()
+
+
+def get_current_user() -> tuple[str | None, str | None]:
+    """Return (name, role) of the logged-in user, or (None, None)."""
+    return (
+        st.session_state.get("current_user"),
+        st.session_state.get("current_user_role"),
+    )
+
+
 def render_sidebar_info():
     """Render STT/LLM info in the sidebar."""
     with st.sidebar:
@@ -122,6 +169,7 @@ def init_page():
     """Call at the top of every page (after st.set_page_config)."""
     db.init_db()
     inject_css()
+    render_login_widget()
     render_sidebar_info()
 
 
@@ -148,6 +196,13 @@ def metric_card(value, label: str, color: str | None = None) -> str:
 
 
 # ── Background processing ────────────────────────────────────────────────
+#
+# NOTE on durability:
+#   Background pipeline work runs in daemon threads. If the Streamlit process
+#   is killed mid-processing, in-flight calls stay stuck in 'processing' state
+#   in the DB. Re-opening the Admin page lets the user re-process them manually.
+#   For production multi-user deployments, consider replacing this with a
+#   persistent job queue (Celery + Redis, or a PostgreSQL-backed LISTEN/NOTIFY).
 
 _processing_lock = threading.Lock()
 _queue_lock = threading.Lock()
@@ -166,7 +221,8 @@ def launch_processing(call_id: int) -> None:
         try:
             pipeline.process_call(call_id)
         except Exception:
-            pass
+            # Already logged + DB status marked 'error' inside pipeline
+            log.error("Background processing crashed for call_id=%s", call_id)
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -193,7 +249,8 @@ def launch_processing_queue(call_ids: list) -> list | None:
                 try:
                     pipeline.process_call(cid)
                 except Exception:
-                    pass
+                    # Already logged + DB marked 'error' inside pipeline — continue queue
+                    log.error("Queue item failed for call_id=%s — continuing", cid)
         finally:
             with _queue_lock:
                 _queue_running = False

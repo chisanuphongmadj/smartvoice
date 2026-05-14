@@ -1,5 +1,5 @@
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 
 import pandas as pd
 import plotly.express as px
@@ -277,8 +277,14 @@ st.divider()
 
 # ── Agent Performance ────────────────────────────────────────────────────
 st.subheader("👤 Agent Performance")
+st.caption(
+    "🔗 สายในเคสเดียวกันถูกรวมเป็นแถวเดียว "
+    "(คะแนน = ค่าเฉลี่ย, Next Action = จากสายล่าสุด) "
+    "— เคสที่ปิดแล้วจะไม่แสดง Next Action"
+)
 
-agent_rows = []
+# Collect per-call scored entries first, then group by case_id.
+scored_calls = []
 for call in done_calls:
     raw = call.get("agent_performance") or ""
     try:
@@ -286,15 +292,83 @@ for call in done_calls:
     except (json.JSONDecodeError, TypeError):
         ap = {}
     if ap.get("overall_score"):
-        agent_rows.append({
-            "Filename": call["filename"],
-            "Politeness": f"{ap.get('politeness', 0)} / 5",
-            "Problem Solving": f"{ap.get('problem_solving', 0)} / 5",
-            "Next Action": ap.get("next_action") or ap.get("resolution_suggestion") or "—",
-            "Score": ap.get("overall_score", 0),
+        scored_calls.append({
+            "call_id": call["id"],
+            "case_id": call.get("case_id"),
+            "filename": call["filename"],
+            "phone": call.get("customer_phone") or "",
+            "created_at": call.get("created_at") or "",
+            "politeness": float(ap.get("politeness", 0)),
+            "problem_solving": float(ap.get("problem_solving", 0)),
+            "overall_score": float(ap.get("overall_score", 0)),
+            "next_action": ap.get("next_action") or "—",
+            "next_action_owner": ap.get("next_action_owner") or "ไม่มี",
         })
 
+# Group calls that share a case_id; standalone calls (no case_id) stay solo.
+case_groups: dict = defaultdict(list)
+solo_calls: list = []
+for entry in scored_calls:
+    if entry["case_id"]:
+        case_groups[entry["case_id"]].append(entry)
+    else:
+        solo_calls.append(entry)
+
+# Cache case records (subject + status) to avoid repeated DB lookups
+_case_cache: dict = {}
+
+def _get_case(case_id: int) -> dict:
+    if case_id not in _case_cache:
+        cs = db.get_case_by_id(case_id)
+        _case_cache[case_id] = cs or {"subject": f"เคส #{case_id}", "status": "open"}
+    return _case_cache[case_id]
+
+def _phone_prefix(phone: str) -> str:
+    return f"\U0001F4DE {phone} · " if phone else ""  # \U0001F4DE = 📞
+
+CLOSED_ACTION = "— เคสปิดแล้ว (ไม่มีเรื่องค้าง)"
+CLOSED_OWNER = "—"
+
+agent_rows = []
+for case_id, entries in case_groups.items():
+    # Latest call within case drives the "next action" (current outstanding step)
+    entries_sorted = sorted(entries, key=lambda e: e["created_at"])
+    latest = entries_sorted[-1]
+    n = len(entries)
+    # All calls in a case share the customer → pick the first non-empty phone
+    phone = next((e["phone"] for e in entries if e["phone"]), "")
+    case = _get_case(case_id)
+    is_closed = case.get("status") == "closed"
+    if n == 1:
+        # Single-call case — filename + phone prefix
+        label = f"{_phone_prefix(phone)}{latest['filename']}"
+    else:
+        label = f"{_phone_prefix(phone)}📂 เคส #{case_id} — {case['subject']} ({n} สาย)"
+    agent_rows.append({
+        "Label": label,
+        "Politeness": f"{sum(e['politeness'] for e in entries) / n:.1f} / 5.0",
+        "Problem Solving": f"{sum(e['problem_solving'] for e in entries) / n:.1f} / 5.0",
+        "Next Action": CLOSED_ACTION if is_closed else latest["next_action"],
+        "Owner": CLOSED_OWNER if is_closed else latest["next_action_owner"],
+        "Score": round(sum(e["overall_score"] for e in entries) / n, 1),
+        "_sort": entries_sorted[-1]["created_at"],
+    })
+
+for entry in solo_calls:
+    agent_rows.append({
+        "Label": f"{_phone_prefix(entry['phone'])}{entry['filename']}",
+        "Politeness": f"{entry['politeness']:.1f} / 5.0",
+        "Problem Solving": f"{entry['problem_solving']:.1f} / 5.0",
+        "Next Action": entry["next_action"],
+        "Owner": entry["next_action_owner"],
+        "Score": entry["overall_score"],
+        "_sort": entry["created_at"],
+    })
+
 if agent_rows:
+    agent_rows.sort(key=lambda r: r["_sort"], reverse=True)
+    for r in agent_rows:
+        r.pop("_sort", None)
     ap_df = pd.DataFrame(agent_rows)
     avg_score = ap_df["Score"].mean()
 
@@ -302,14 +376,14 @@ if agent_rows:
     with ag1:
         st.markdown(metric_card(f"{avg_score:.1f}", "Avg Agent Score / 10"), unsafe_allow_html=True)
     with ag2:
-        best = ap_df.loc[ap_df["Score"].idxmax(), "Filename"]
+        best = ap_df.loc[ap_df["Score"].idxmax(), "Label"]
         st.markdown(
             f'<div class="metric-card"><div class="metric-value" style="font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="{best}">{best}</div>'
-            f'<div class="metric-label">Best Call 🏆</div></div>',
+            f'<div class="metric-label">Best 🏆</div></div>',
             unsafe_allow_html=True,
         )
     with ag3:
-        worst = ap_df.loc[ap_df["Score"].idxmin(), "Filename"]
+        worst = ap_df.loc[ap_df["Score"].idxmin(), "Label"]
         st.markdown(
             f'<div class="metric-card"><div class="metric-value" style="font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="{worst}">{worst}</div>'
             f'<div class="metric-label">Needs Improvement 📋</div></div>',
@@ -322,12 +396,62 @@ if agent_rows:
         width="stretch",
         hide_index=True,
         column_config={
-            "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%d / 10"),
+            "Label": st.column_config.TextColumn("สาย / เคส", width="large"),
+            "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%.1f / 10"),
             "Next Action": st.column_config.TextColumn("Next Action 📌", width="large"),
+            "Owner": st.column_config.TextColumn("ผู้รับผิดชอบ 👤", width="medium"),
         },
     )
 else:
     st.caption("ยังไม่มีข้อมูล Agent Performance — re-process ไฟล์เสียงเพื่อดูผล")
+
+st.divider()
+
+# ── Case Stats ───────────────────────────────────────────────────────────
+st.subheader("📂 Case Management")
+
+case_counts = db.get_case_counts()
+all_cases = db.get_all_cases()
+
+cs_col1, cs_col2, cs_col3, cs_col4 = st.columns(4)
+with cs_col1:
+    st.markdown(metric_card(case_counts["total"], "Total Cases"), unsafe_allow_html=True)
+with cs_col2:
+    st.markdown(metric_card(case_counts["open"], "🟢 เปิด (Open)", "#22c55e"), unsafe_allow_html=True)
+with cs_col3:
+    st.markdown(metric_card(case_counts["follow_up"], "🟡 ติดตาม (Follow-up)", "#eab308"), unsafe_allow_html=True)
+with cs_col4:
+    st.markdown(metric_card(case_counts["closed"], "🔴 ปิด (Closed)", "#ef4444"), unsafe_allow_html=True)
+
+if all_cases:
+    st.markdown("<br>", unsafe_allow_html=True)
+    case_rows = []
+    _case_badge = {"open": "🟢 เปิด", "follow_up": "🟡 ติดตาม", "closed": "🔴 ปิด"}
+    for cs in all_cases:
+        customer_name = (
+            f"{cs.get('first_name', '')} {cs.get('last_name', '')}".strip() or "—"
+        )
+        case_rows.append({
+            "Case ID": cs["id"],
+            "Subject": cs["subject"],
+            "Customer": customer_name,
+            "Phone": cs.get("phone") or "—",
+            "Calls": cs.get("call_count", 0),
+            "Status": _case_badge.get(cs["status"], cs["status"]),
+            "Updated": cs.get("updated_at", "")[:10],
+        })
+    cases_df = pd.DataFrame(case_rows)
+    st.dataframe(
+        cases_df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Subject": st.column_config.TextColumn(width="large"),
+            "Customer": st.column_config.TextColumn(width="medium"),
+        },
+    )
+else:
+    st.caption("ยังไม่มีเคสในระบบ — เคสจะถูกสร้างอัตโนมัติหลัง process สาย")
 
 st.divider()
 
