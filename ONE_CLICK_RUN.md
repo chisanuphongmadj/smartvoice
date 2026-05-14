@@ -53,11 +53,12 @@ ollama pull scb10x/llama3.1-typhoon2-8b-instruct
 
 ## Demo mode
 
-For a machine without GPU or without HuggingFace access, set this in `.env`:
+For a machine without GPU or without HuggingFace access:
 
-```env
-MOCK_STT=true
-```
+1. Open the app.
+2. Go to `Settings`.
+3. Click `Use Demo Laptop Mode`.
+4. Restart with `run.bat`.
 
 The app will still open, and uploads can be tested with mock transcripts.
 

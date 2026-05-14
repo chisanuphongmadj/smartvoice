@@ -24,9 +24,7 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 
 For a laptop without GPU or HuggingFace access:
 
-```env
-MOCK_STT=true
-```
+Open `Settings`, click `Use Demo Laptop Mode`, then restart the app.
 
 For a realistic Omazz demo:
 
