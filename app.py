@@ -10,6 +10,7 @@ st.set_page_config(
 )
 
 from smartvoice import db
+from smartvoice.preflight import run_preflight_checks
 from smartvoice.ui_helpers import init_page, metric_card
 
 init_page()
@@ -39,3 +40,13 @@ with col4:
 
 st.markdown("<br>", unsafe_allow_html=True)
 st.info("👈 เลือกหน้าจาก sidebar เพื่อเริ่มใช้งาน")
+
+with st.expander("Deployment readiness", expanded=False):
+    checks = run_preflight_checks()
+    for check in checks:
+        if check.ok:
+            st.success(f"{check.name}: {check.detail}")
+        elif check.severity == "error":
+            st.error(f"{check.name}: {check.detail}")
+        else:
+            st.warning(f"{check.name}: {check.detail}")

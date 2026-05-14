@@ -6,6 +6,7 @@ These tests use a temporary SQLite file per test to avoid touching prod data.
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from smartvoice import db
@@ -51,6 +52,12 @@ class TestSchema(DBTestCase):
                           "anomaly_severity", "processing_step",
                           "uploaded_by", "uploaded_by_role"):
             self.assertIn(expected, cols)
+
+    def test_foreign_keys_are_enabled(self):
+        conn = db.get_connection()
+        enabled = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        conn.close()
+        self.assertEqual(enabled, 1)
 
 
 class TestIdempotentInserts(DBTestCase):
@@ -240,6 +247,40 @@ class TestLatestCallTimeInCase(DBTestCase):
         self.assertIsNotNone(latest)
         # Should be an ISO-like timestamp string
         self.assertIn("T", latest)
+
+
+class TestRecoverStaleProcessing(DBTestCase):
+    def test_recover_stale_processing_resets_old_processing_calls(self):
+        call_id = db.insert_call("stale.wav", "h_stale", "/stale.wav")
+        db.update_call_status(call_id, "processing")
+        stale_time = (
+            datetime.now(timezone.utc) - timedelta(minutes=240)
+        ).isoformat(timespec="seconds")
+        conn = db.get_connection()
+        with conn:
+            conn.execute(
+                "UPDATE calls SET updated_at = ?, processing_step = ? WHERE id = ?",
+                (stale_time, "working", call_id),
+            )
+        conn.close()
+
+        recovered = db.recover_stale_processing(180)
+        row = db.get_call_by_id(call_id)
+
+        self.assertEqual(recovered, 1)
+        self.assertEqual(row["status"], "uploaded")
+        self.assertIsNone(row["processing_step"])
+        self.assertIn("Recovered from stale processing", row["error_msg"])
+
+    def test_recover_stale_processing_keeps_recent_processing_calls(self):
+        call_id = db.insert_call("recent.wav", "h_recent", "/recent.wav")
+        db.update_call_status(call_id, "processing")
+
+        recovered = db.recover_stale_processing(180)
+        row = db.get_call_by_id(call_id)
+
+        self.assertEqual(recovered, 0)
+        self.assertEqual(row["status"], "processing")
 
 
 if __name__ == "__main__":

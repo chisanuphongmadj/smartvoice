@@ -5,7 +5,13 @@ import threading
 import streamlit as st
 
 from smartvoice import db, pipeline
-from smartvoice.config import WHISPER_MODEL, OLLAMA_MODEL, MOCK_STT
+from smartvoice.auth import authenticate, is_auth_configured
+from smartvoice.config import (
+    WHISPER_MODEL,
+    OLLAMA_MODEL,
+    MOCK_STT,
+    PROCESSING_STALE_MINUTES,
+)
 from smartvoice.logger import get_logger
 
 log = get_logger(__name__)
@@ -108,7 +114,7 @@ def inject_css():
     st.markdown(f"<style>{_CSS}</style>", unsafe_allow_html=True)
 
 
-# ── Simple staff login (no password — captures who did what for audit log) ──
+# ── Staff login ────────────────────────────────────────────────────────────
 
 STAFF_ROLES = ["Admin", "Supervisor", "Agent", "QA"]
 
@@ -116,33 +122,57 @@ STAFF_ROLES = ["Admin", "Supervisor", "Agent", "QA"]
 def render_login_widget():
     """Render a lightweight login at the top of the sidebar.
 
-    Captures `current_user` (name) + `current_user_role` into session state.
-    No password — this is an **audit-trail** feature, not security. For a
-    hardened multi-tenant deployment, replace with proper auth (e.g.
-    streamlit-authenticator + hashed credentials).
+    If SMARTVOICE_USERS is configured, credentials are checked against PBKDF2
+    hashes. If not configured, the widget falls back to demo/audit mode so
+    evaluators can still open the app without setup friction.
     """
     with st.sidebar:
         user = st.session_state.get("current_user")
         role = st.session_state.get("current_user_role")
+        auth_enabled = is_auth_configured()
 
         if user:
-            st.success(f"👤 **{user}**  \n_{role}_")
+            auth_label = "secured" if auth_enabled else "demo/audit"
+            st.success(f"👤 **{user}**  \n_{role}_  \n`{auth_label}`")
             if st.button("🚪 Logout", use_container_width=True, key="_logout_btn"):
                 st.session_state.pop("current_user", None)
                 st.session_state.pop("current_user_role", None)
                 st.rerun()
         else:
             st.markdown("### 🔑 เข้าสู่ระบบ")
-            name = st.text_input("ชื่อ-นามสกุล", key="_login_name", placeholder="เช่น สุภาพร จันทร์แก้ว")
-            role_pick = st.selectbox("บทบาท", STAFF_ROLES, key="_login_role")
-            if st.button("✅ Login", use_container_width=True, key="_login_btn"):
-                name_clean = (name or "").strip()
-                if not name_clean:
-                    st.error("กรุณาใส่ชื่อ")
-                else:
-                    st.session_state["current_user"] = name_clean
-                    st.session_state["current_user_role"] = role_pick
-                    st.rerun()
+            if auth_enabled:
+                username = st.text_input("Username", key="_login_username")
+                password = st.text_input("Password", type="password", key="_login_password")
+                if st.button("✅ Login", use_container_width=True, key="_login_btn"):
+                    record = authenticate(username, password)
+                    if not record:
+                        st.error("Username หรือ password ไม่ถูกต้อง")
+                    else:
+                        st.session_state["current_user"] = record.username
+                        st.session_state["current_user_role"] = record.role
+                        st.rerun()
+            else:
+                st.caption("Demo mode: set SMARTVOICE_USERS in .env to require a password.")
+                name = st.text_input("ชื่อ-นามสกุล", key="_login_name", placeholder="เช่น สุภาพร จันทร์แก้ว")
+                role_pick = st.selectbox("บทบาท", STAFF_ROLES, key="_login_role")
+                if st.button("✅ Login", use_container_width=True, key="_login_btn"):
+                    name_clean = (name or "").strip()
+                    if not name_clean:
+                        st.error("กรุณาใส่ชื่อ")
+                    else:
+                        st.session_state["current_user"] = name_clean
+                        st.session_state["current_user_role"] = role_pick
+                        st.rerun()
+
+
+def recover_stale_processing_once() -> None:
+    if st.session_state.get("_stale_processing_checked"):
+        return
+    st.session_state["_stale_processing_checked"] = True
+    recovered = db.recover_stale_processing(PROCESSING_STALE_MINUTES)
+    if recovered:
+        log.warning("Recovered %s stale processing calls", recovered)
+        st.sidebar.warning(f"Recovered {recovered} stale processing call(s).")
 
 
 def get_current_user() -> tuple[str | None, str | None]:
@@ -168,6 +198,7 @@ def render_sidebar_info():
 def init_page():
     """Call at the top of every page (after st.set_page_config)."""
     db.init_db()
+    recover_stale_processing_once()
     inject_css()
     render_login_widget()
     render_sidebar_info()

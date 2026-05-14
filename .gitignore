@@ -11,9 +11,11 @@ env/
 # Environment variables (contains secrets)
 .env
 
-# Database & audio data
-# data/smartvoice.db    ← included for teammates to view pre-processed results
-# data/raw_audio/       ← included for teammates to have sample audio files
+# Local runtime data. Do not commit customer audio, transcripts, or local DBs.
+data/*.db
+data/*.sqlite
+data/raw_audio/
+data/exports/
 
 # Converted CTranslate2 models (large, regenerated on first run)
 data/models/

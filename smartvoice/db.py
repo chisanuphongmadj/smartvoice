@@ -1,6 +1,6 @@
-import sqlite3
 import os
-from datetime import datetime, timezone
+import sqlite3
+from datetime import datetime, timedelta, timezone
 
 
 def _now() -> str:
@@ -17,6 +17,8 @@ def get_connection() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -311,6 +313,35 @@ def count_orphan_cases() -> int:
     ).fetchone()
     conn.close()
     return row["n"] if row else 0
+
+
+def recover_stale_processing(max_age_minutes: int) -> int:
+    """Reset stale processing calls to uploaded so they can be retried."""
+    if max_age_minutes <= 0:
+        return 0
+    threshold = (
+        datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+    ).isoformat(timespec="seconds")
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """
+            UPDATE calls
+            SET status = 'uploaded',
+                processing_step = NULL,
+                error_msg = ?,
+                updated_at = ?
+            WHERE status = 'processing'
+              AND updated_at < ?
+            """,
+            (
+                f"Recovered from stale processing state after {max_age_minutes} minutes.",
+                _now(),
+                threshold,
+            ),
+        )
+    conn.close()
+    return cur.rowcount or 0
 
 
 def get_done_calls() -> list[dict]:

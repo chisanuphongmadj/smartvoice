@@ -16,6 +16,8 @@ For real AI analysis, also install:
 - Ollama: https://ollama.com
 - HuggingFace token with access to `pyannote/speaker-diarization-3.1` and `pyannote/segmentation-3.0`
 
+Before sending the project to another company, follow `docs/OMAZZ_RELEASE_CHECKLIST.md`.
+
 ## Windows
 
 1. Install Python 3.10 or 3.11 from https://www.python.org/downloads/
@@ -63,7 +65,7 @@ The app will still open, and uploads can be tested with mock transcripts.
 
 For the easiest handoff to non-technical users:
 
-1. Zip the project folder, excluding `.venv`, `.git`, `data/models`, and large audio files.
+1. Zip the project folder, excluding `.venv`, `.git`, `.env`, `data/raw_audio`, `data/models`, `data/logs`, and local DB files.
 2. Ask the user to unzip it.
 3. Ask them to double-click `run.bat`.
 

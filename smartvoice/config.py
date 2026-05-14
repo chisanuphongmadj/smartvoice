@@ -51,3 +51,7 @@ DB_PATH = os.getenv("DB_PATH", "data/smartvoice.db")
 # resumed" pattern, which LLM topic-matching misses when topics drift.
 # Set to 0 to disable the short-circuit and always use LLM matching.
 CASE_RECENCY_HOURS = _get_float("CASE_RECENCY_HOURS", "4.0")
+
+# Reset calls that were left in `processing` after the app/process was killed.
+# Set to 0 to disable automatic recovery.
+PROCESSING_STALE_MINUTES = _get_int("PROCESSING_STALE_MINUTES", "180")

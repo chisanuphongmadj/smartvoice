@@ -1,4 +1,4 @@
-"""
+r"""
 Seed mock customers and warranty registrations for SmartVoice demo.
 Run: .venv\Scripts\python.exe seed_mock_data.py
 """
