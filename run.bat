@@ -65,8 +65,10 @@ for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.version.cuda
 for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.cuda.is_available())"' ) do set "TORCH_CUDA_AVAILABLE=%%A"
 
 set "CONFIGURED_DEVICE=auto"
+set "CONFIGURED_OLLAMA_MODEL=scb10x/llama3.1-typhoon2-8b-instruct"
 if exist ".env" (
     for /f "tokens=1,* delims==" %%A in ('findstr /b /c:"WHISPER_DEVICE=" ".env"') do set "CONFIGURED_DEVICE=%%B"
+    for /f "tokens=1,* delims==" %%A in ('findstr /b /c:"OLLAMA_MODEL=" ".env"') do set "CONFIGURED_OLLAMA_MODEL=%%B"
 )
 
 set "NVIDIA_GPU=0"
@@ -113,6 +115,29 @@ if "%NVIDIA_GPU%"=="1" (
             echo Recommended reinstall commands for this machine:
             echo   "%VENV_PY%" -m pip uninstall -y torch torchvision torchaudio
             echo   "%VENV_PY%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/%CUDA_WHEEL_TAG%
+            echo.
+            choice /c YN /m "Install the recommended CUDA-enabled PyTorch build now"
+            if errorlevel 2 (
+                echo Skipping CUDA-enabled PyTorch install.
+            ) else (
+                echo.
+                echo Installing CUDA-enabled PyTorch build...
+                "%VENV_PY%" -m pip uninstall -y torch torchvision torchaudio
+                if errorlevel 1 goto error
+                "%VENV_PY%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/%CUDA_WHEEL_TAG%
+                if errorlevel 1 goto error
+                for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.__version__)"' ) do set "TORCH_VERSION=%%A"
+                for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.version.cuda or '')"' ) do set "TORCH_CUDA_VERSION=%%A"
+                for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.cuda.is_available())"' ) do set "TORCH_CUDA_AVAILABLE=%%A"
+                echo.
+                echo CUDA install result
+                echo   PyTorch: %TORCH_VERSION%
+                echo   PyTorch CUDA build: %TORCH_CUDA_VERSION%
+                echo   PyTorch CUDA usable: %TORCH_CUDA_AVAILABLE%
+                if /i not "%TORCH_CUDA_AVAILABLE%"=="True" (
+                    echo WARNING: CUDA is still not usable after install. Check the NVIDIA driver and restart this launcher.
+                )
+            )
         ) else (
             echo Open https://pytorch.org/get-started/locally/ and choose the CUDA build that matches this machine.
         )
@@ -128,14 +153,62 @@ if /i "%CONFIGURED_DEVICE%"=="cuda" if /i not "%TORCH_CUDA_AVAILABLE%"=="True" (
     echo          Set WHISPER_DEVICE=cpu or WHISPER_DEVICE=auto in .env until CUDA is fixed.
 )
 
+set "OLLAMA_CMD="
 where ollama >nul 2>nul
-if %ERRORLEVEL%==0 (
-    echo Starting Ollama in the background if it is not already running...
-    start "SmartVoice Ollama" /min ollama serve
-) else (
+if not errorlevel 1 (
+    for /f "delims=" %%A in ('where ollama') do if not defined OLLAMA_CMD set "OLLAMA_CMD=%%A"
+)
+if not defined OLLAMA_CMD if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "OLLAMA_CMD=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
+
+if not defined OLLAMA_CMD (
     echo.
     echo NOTE: Ollama is not installed or not in PATH.
-    echo Install Ollama from https://ollama.com for real LLM analysis.
+    echo Real LLM analysis needs Ollama for Windows.
+    echo Official installer source: https://ollama.com/download/windows
+    echo.
+    choice /c YN /m "Install Ollama for Windows now"
+    if errorlevel 2 (
+        echo Skipping Ollama install.
+    ) else (
+        echo.
+        echo Installing Ollama for Windows...
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://ollama.com/install.ps1 | iex"
+        if errorlevel 1 goto error
+        if exist "%LOCALAPPDATA%\Programs\Ollama\ollama.exe" set "OLLAMA_CMD=%LOCALAPPDATA%\Programs\Ollama\ollama.exe"
+        if not defined OLLAMA_CMD (
+            echo WARNING: Ollama installation finished, but ollama.exe was not found yet.
+            echo          Open a new terminal or restart this launcher after installation.
+        )
+    )
+)
+
+if defined OLLAMA_CMD (
+    echo Starting Ollama in the background if it is not already running...
+    start "SmartVoice Ollama" /min "%OLLAMA_CMD%" serve
+    timeout /t 3 /nobreak >nul
+
+    set "OLLAMA_MODEL_INSTALLED=0"
+    "%OLLAMA_CMD%" list | findstr /i /c:"%CONFIGURED_OLLAMA_MODEL%" >nul 2>nul
+    if not errorlevel 1 set "OLLAMA_MODEL_INSTALLED=1"
+
+    if "%OLLAMA_MODEL_INSTALLED%"=="0" (
+        echo.
+        echo NOTE: Required Ollama model is not installed:
+        echo   %CONFIGURED_OLLAMA_MODEL%
+        echo Model downloads can be several GB.
+        echo.
+        choice /c YN /m "Download the required Ollama model now"
+        if errorlevel 2 (
+            echo Skipping Ollama model download.
+        ) else (
+            echo.
+            echo Downloading Ollama model...
+            "%OLLAMA_CMD%" pull "%CONFIGURED_OLLAMA_MODEL%"
+            if errorlevel 1 goto error
+        )
+    )
+) else (
+    echo Install Ollama from https://ollama.com/download/windows for real LLM analysis.
 )
 
 echo.

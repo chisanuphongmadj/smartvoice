@@ -30,7 +30,9 @@ After that, double-clicking `run.bat` starts the app.
 
 `run.bat` also prints a local environment check on startup. If it detects an NVIDIA GPU
 but the current virtual environment cannot use CUDA, it prints the recommended PyTorch
-reinstall commands for that machine. It does not install GPU packages automatically.
+reinstall commands for that machine and asks whether to install the recommended CUDA
+build immediately. If Ollama or the configured Ollama model is missing, it also asks
+whether to install Ollama for Windows and download the required model.
 
 ## macOS / Linux
 
