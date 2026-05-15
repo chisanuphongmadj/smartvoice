@@ -1,0 +1,36 @@
+[client]
+toolbarMode = "minimal"
+
+[theme]
+base = "dark"
+primaryColor = "#7c83f0"
+backgroundColor = "#0f1117"
+secondaryBackgroundColor = "#1e2130"
+textColor = "#f3f4f6"
+
+[theme.sidebar]
+backgroundColor = "#1a1d27"
+secondaryBackgroundColor = "#252a3a"
+textColor = "#f3f4f6"
+
+[theme.dark]
+primaryColor = "#7c83f0"
+backgroundColor = "#0f1117"
+secondaryBackgroundColor = "#1e2130"
+textColor = "#f3f4f6"
+
+[theme.dark.sidebar]
+backgroundColor = "#1a1d27"
+secondaryBackgroundColor = "#252a3a"
+textColor = "#f3f4f6"
+
+[theme.light]
+primaryColor = "#7c83f0"
+backgroundColor = "#0f1117"
+secondaryBackgroundColor = "#1e2130"
+textColor = "#f3f4f6"
+
+[theme.light.sidebar]
+backgroundColor = "#1a1d27"
+secondaryBackgroundColor = "#252a3a"
+textColor = "#f3f4f6"

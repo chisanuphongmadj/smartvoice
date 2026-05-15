@@ -13,6 +13,7 @@ from smartvoice.config import (
     PROCESSING_STALE_MINUTES,
 )
 from smartvoice.logger import get_logger
+from smartvoice.preflight import get_ollama_readiness
 
 log = get_logger(__name__)
 
@@ -242,6 +243,9 @@ _queue_running = False
 
 def launch_processing(call_id: int) -> None:
     """Run pipeline.process_call in a background thread."""
+    ollama_ready, _ = get_ollama_readiness()
+    if not ollama_ready:
+        return
     with _processing_lock:
         call = db.get_call_by_id(call_id)
         if not call or call["status"] == "processing":
@@ -260,6 +264,9 @@ def launch_processing(call_id: int) -> None:
 
 def launch_processing_queue(call_ids: list) -> list | None:
     """Process a list of calls sequentially in a single background thread."""
+    ollama_ready, _ = get_ollama_readiness()
+    if not ollama_ready:
+        return None
     global _queue_running
     with _queue_lock:
         if _queue_running:
