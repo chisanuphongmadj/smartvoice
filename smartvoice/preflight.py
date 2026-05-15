@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import requests
 
 from smartvoice.auth import is_auth_configured
-from smartvoice.config import HF_TOKEN, MOCK_STT, OLLAMA_BASE_URL
+from smartvoice.config import HF_TOKEN, MOCK_STT, OLLAMA_BASE_URL, OLLAMA_MODEL
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,62 @@ class CheckResult:
     ok: bool
     detail: str
     severity: str = "warning"
+
+
+def recommend_cuda_wheel_tag(cuda_version: str | None) -> str | None:
+    if not cuda_version:
+        return None
+    try:
+        major_text, minor_text, *_ = cuda_version.strip().split(".")
+        version = (int(major_text), int(minor_text))
+    except (TypeError, ValueError):
+        return None
+    if version >= (12, 8):
+        return "cu128"
+    if version >= (12, 6):
+        return "cu126"
+    if version >= (11, 8):
+        return "cu118"
+    return None
+
+
+def _canonical_ollama_model_name(model_name: str) -> str:
+    final_segment = model_name.rsplit("/", 1)[-1]
+    return model_name if ":" in final_segment else f"{model_name}:latest"
+
+
+def get_ollama_readiness() -> tuple[bool, str]:
+    if MOCK_STT:
+        return True, "demo mode"
+
+    ollama_binary = shutil.which("ollama")
+    if not ollama_binary:
+        return False, "Ollama CLI not found in PATH"
+
+    try:
+        response = requests.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags", timeout=2)
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        return False, f"Ollama server not reachable: {exc.__class__.__name__}"
+
+    models = {
+        _canonical_ollama_model_name(model["name"])
+        for model in data.get("models", [])
+        if isinstance(model, dict) and model.get("name")
+    }
+    if _canonical_ollama_model_name(OLLAMA_MODEL) not in models:
+        return False, f"model `{OLLAMA_MODEL}` not found"
+    return True, "ready"
+
+
+def ollama_setup_lines() -> list[str]:
+    return [
+        "1. ติดตั้ง Ollama จาก https://ollama.com",
+        "2. เปิด terminal แล้วรัน `ollama serve`",
+        f"3. เปิด terminal อีกหน้าต่างแล้วรัน `ollama pull {OLLAMA_MODEL}`",
+        "4. กลับมาหน้านี้แล้วรีเฟรชอีกครั้ง",
+    ]
 
 
 def run_preflight_checks() -> list[CheckResult]:
@@ -57,14 +113,8 @@ def run_preflight_checks() -> list[CheckResult]:
         "warning",
     ))
 
-    try:
-        response = requests.get(f"{OLLAMA_BASE_URL.rstrip('/')}/api/tags", timeout=2)
-        ollama_ok = response.ok
-        detail = "server reachable" if ollama_ok else f"server returned HTTP {response.status_code}"
-    except requests.RequestException as exc:
-        ollama_ok = False
-        detail = f"server not reachable: {exc.__class__.__name__}"
-    checks.append(CheckResult("Ollama server", ollama_ok, detail, "warning"))
+    ollama_ready, detail = get_ollama_readiness()
+    checks.append(CheckResult("Ollama", ollama_ready, detail, "warning"))
 
     data_dir = os.path.abspath("data")
     checks.append(CheckResult(

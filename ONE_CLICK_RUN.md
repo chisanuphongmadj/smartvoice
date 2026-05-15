@@ -28,6 +28,10 @@ Before sending the project to another company, follow `docs/OMAZZ_RELEASE_CHECKL
 First run can take several minutes because it installs dependencies.
 After that, double-clicking `run.bat` starts the app.
 
+`run.bat` also prints a local environment check on startup. If it detects an NVIDIA GPU
+but the current virtual environment cannot use CUDA, it prints the recommended PyTorch
+reinstall commands for that machine. It does not install GPU packages automatically.
+
 ## macOS / Linux
 
 ```bash

@@ -6,6 +6,7 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Admin", page_icon="📤", layout="wide")
 
 from smartvoice import db, file_manager
+from smartvoice.preflight import get_ollama_readiness, ollama_setup_lines
 from smartvoice.ui_helpers import (
     get_current_user,
     init_page,
@@ -92,6 +93,17 @@ st.divider()
 st.subheader("2. Process Calls")
 
 calls = db.get_all_calls()
+ollama_ready, ollama_detail = get_ollama_readiness()
+processing_blocked = not ollama_ready
+
+if processing_blocked:
+    st.error(
+        "ยังประมวลผลไม่ได้ใน Real AI mode เพราะ Ollama ยังไม่พร้อม "
+        f"({ollama_detail})"
+    )
+    st.markdown("**วิธีติดตั้ง Ollama และโมเดลที่โปรเจกต์ใช้**")
+    for line in ollama_setup_lines():
+        st.markdown(line)
 
 # Clean up `just_launched` — remove ids whose DB status has moved past 'processing'.
 # (Without this, a call keeps showing PROCESSING forever because the session-state
@@ -124,7 +136,7 @@ col_a, col_b = st.columns([1, 3])
 with col_a:
     process_all_btn = st.button(
         "▶ Process All Pending",
-        disabled=len(pending) == 0,
+        disabled=len(pending) == 0 or processing_blocked,
         use_container_width=True,
         type="primary",
     )
@@ -504,6 +516,7 @@ else:
                         "▶ Process",
                         key=f"proc_{call['id']}",
                         use_container_width=True,
+                        disabled=processing_blocked,
                     ):
                         if "just_launched" not in st.session_state:
                             st.session_state.just_launched = set()
@@ -516,6 +529,7 @@ else:
                         "🔄 Re-process",
                         key=f"reproc_{call['id']}",
                         use_container_width=True,
+                        disabled=processing_blocked,
                     ):
                         db.update_call_status(call["id"], "uploaded")
                         if "just_launched" not in st.session_state:

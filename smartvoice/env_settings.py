@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from dotenv import dotenv_values, set_key
@@ -32,9 +33,18 @@ def read_env(path: Path = ENV_PATH) -> dict[str, str]:
 
 def write_env(updates: dict[str, str], path: Path = ENV_PATH) -> None:
     ensure_env_file(path)
-    for key, value in updates.items():
-        safe_value = "" if value is None else str(value)
-        set_key(str(path), key, safe_value, quote_mode="auto")
+    safe_updates = {
+        key: "" if value is None else str(value) for key, value in updates.items()
+    }
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir) / ".env"
+        shutil.copyfile(path, temp_path)
+        for key, safe_value in safe_updates.items():
+            set_key(str(temp_path), key, safe_value, quote_mode="auto")
+        path.write_text(temp_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    for key, safe_value in safe_updates.items():
         os.environ[key] = safe_value
 
 
