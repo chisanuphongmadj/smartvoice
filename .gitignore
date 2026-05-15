@@ -23,6 +23,10 @@ data/models/
 # Runtime logs
 data/logs/
 
+# Local analysis scratch files
+_*.txt
+_*.py
+
 # Docs output
 docs/er_diagram.png
 
