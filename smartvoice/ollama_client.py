@@ -240,6 +240,35 @@ def analyze_sentiment(conversation) -> dict:
     }
 
 
+_PROMPT_EXAMPLE_TOKENS = ("15,000", "15000", "REG0012", "081-987-9336", "0819879336")
+
+
+def _scrub_prompt_example_leakage(next_action: str, conversation_text: str) -> str:
+    """Strip example values from prompts.py that the LLM copied verbatim.
+
+    Why: Typhoon-8B sometimes lifts the in-prompt next_action example
+    ("จำนวน 15,000 บาท ... รหัส #REG0012 ... 081-987-9336") even when the
+    real conversation never mentioned those numbers. Detect tokens that exist
+    in the example but NOT in the actual transcript and excise the leaked
+    sub-clause.
+    """
+    if not next_action:
+        return next_action
+    convo = conversation_text or ""
+    cleaned = next_action
+    for tok in _PROMPT_EXAMPLE_TOKENS:
+        if tok in cleaned and tok not in convo:
+            log.warning(
+                "evaluate_agent_qa: next_action contained prompt example token %r "
+                "not present in conversation — scrubbing", tok
+            )
+            # Drop the " | "-separated segment that carries the leaked token,
+            # keeping the rest of the action so we don't lose the verb/timing.
+            parts = [p for p in cleaned.split("|") if tok not in p]
+            cleaned = " | ".join(p.strip() for p in parts) if parts else ""
+    return cleaned.strip() or "ติดตามผลและแจ้งลูกค้า | ตามที่ตกลงในสาย | ภายใน 3 วันทำการ | บันทึกผลใน CRM"
+
+
 def evaluate_agent_qa(conversation) -> dict:
     """Call 3: Two-factor agent QA (Politeness + Problem Solving) — see prompts.py."""
     from smartvoice.prompts import build_agent_qa_prompt
@@ -263,6 +292,7 @@ def evaluate_agent_qa(conversation) -> dict:
         overall_score = int(politeness) + int(problem_solving)
 
     next_action = result.get("next_action") or "ไม่มี — เคสปิดสมบูรณ์"
+    next_action = _scrub_prompt_example_leakage(next_action, text)
     next_action_owner = result.get("next_action_owner") or "ไม่มี"
 
     # Fallback: if next_action exists (not closed) but owner is "ไม่มี",

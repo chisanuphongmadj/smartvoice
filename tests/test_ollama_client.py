@@ -94,6 +94,54 @@ class TestNextActionOwnerFallback(unittest.TestCase):
         self.assertEqual(ap["next_action_owner"], "หัวหน้าทีม")
 
 
+class TestPromptExampleScrubbing(unittest.TestCase):
+    """Regression: Typhoon-8B sometimes lifts the prompt's next_action example
+    verbatim (15,000 บาท / #REG0012 / 081-987-9336) even when the actual
+    conversation never mentions those values. The scrubber must drop leaked
+    sub-clauses while keeping non-leaked content."""
+
+    def _run(self, mock_payload, conversation_text="สวัสดีครับ คุณลูกค้าต้องการสอบถามวันจัดส่ง"):
+        conv = [{"speaker": "Agent", "text": conversation_text}]
+        with patch.object(ollama_client, "chat", return_value=json.dumps(mock_payload, ensure_ascii=False)):
+            out = ollama_client.evaluate_agent_qa(conv)
+        return json.loads(out["agent_performance"])
+
+    def test_leaked_refund_template_is_scrubbed(self):
+        ap = self._run({
+            "politeness": 5, "problem_solving": 4, "overall_score": 9,
+            "next_action": "ติดตามการโอนเงินคืนลูกค้า | จำนวน 15,000 บาท (ที่นอน Restonic Queen Size รหัส #REG0012) | ภายใน 7 วันทำการ | โทรแจ้งลูกค้าที่ 081-987-9336 หลังโอนเงินเรียบร้อย + บันทึกใน CRM",
+            "next_action_owner": "ฝ่ายบัญชี",
+        })
+        # Tokens not present in conversation must be gone
+        self.assertNotIn("15,000", ap["next_action"])
+        self.assertNotIn("REG0012", ap["next_action"])
+        self.assertNotIn("081-987-9336", ap["next_action"])
+
+    def test_real_value_present_in_conversation_is_kept(self):
+        # If the conversation actually mentions the amount, the scrubber must
+        # NOT remove it
+        ap = self._run(
+            {
+                "politeness": 5, "problem_solving": 4, "overall_score": 9,
+                "next_action": "ติดตามการโอนเงินคืน | จำนวน 15,000 บาท | ภายใน 7 วันทำการ | โทรแจ้งลูกค้า",
+                "next_action_owner": "ฝ่ายบัญชี",
+            },
+            conversation_text="ลูกค้าขอคืนเงิน 15,000 บาท สำหรับที่นอน",
+        )
+        self.assertIn("15,000", ap["next_action"])
+
+    def test_fully_leaked_falls_back_to_generic(self):
+        # Every segment carries a leaked token → result should fall back to
+        # the generic placeholder, never empty string
+        ap = self._run({
+            "politeness": 5, "problem_solving": 4, "overall_score": 9,
+            "next_action": "15,000 | REG0012 | 081-987-9336 | 15000",
+            "next_action_owner": "ฝ่ายบัญชี",
+        })
+        self.assertTrue(ap["next_action"])
+        self.assertNotIn("REG0012", ap["next_action"])
+
+
 class TestCorrectSpeakersRobustness(unittest.TestCase):
     """Regression: LLM sometimes returns malformed JSON arrays (e.g. bare ints)
     and correct_speakers must not crash."""
