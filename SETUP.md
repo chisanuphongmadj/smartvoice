@@ -1,44 +1,60 @@
 # SmartVoice — คู่มือติดตั้งและเปิดใช้งาน
 
-คู่มือนี้สำหรับ **นักพัฒนา / IT** ติดตั้งระบบครั้งแรก
-สำหรับ **ผู้ใช้งานทั่วไป** ให้ดู [`docs/user_manual.md`](docs/user_manual.md)
+คู่มือนี้สำหรับ **นักพัฒนา / IT** ที่ติดตั้งระบบครั้งแรก
+สำหรับผู้ใช้งานธุรกิจ ให้ดู [`docs/user_manual.md`](docs/user_manual.md)
 
 ---
 
-## 📋 สิ่งที่ต้องเตรียม
+## สิ่งที่ต้องเตรียม
 
-| รายการ | เวอร์ชัน / ข้อมูล | ลิงก์ |
-|--------|-------------------|-------|
-| **Python** | 3.10 หรือ 3.11 (แนะนำ 3.11) | https://www.python.org/downloads/ |
-| **NVIDIA GPU + CUDA** | CUDA 12.x (เร็วกว่ามาก) — CPU ได้แต่ช้า | https://developer.nvidia.com/cuda-downloads |
-| **Ollama** | 0.3.0+ | https://ollama.com |
-| **HuggingFace Token** | ต้อง accept license 2 models | https://huggingface.co/settings/tokens |
-| **Disk space** | ~10 GB (โมเดล + audio cache) | — |
+| รายการ | รายละเอียด |
+|--------|------------|
+| Python | 3.10 หรือ 3.11 |
+| Disk space | ประมาณ 10 GB ขึ้นไปสำหรับ package, model, และ cache |
+| Ollama | จำเป็นสำหรับ LLM analysis |
+| HuggingFace token | จำเป็นสำหรับ pyannote diarization ในโหมด Real AI |
+| NVIDIA GPU | ไม่บังคับ แต่ช่วยให้ STT เร็วขึ้นมาก |
 
-### HuggingFace Token — ต้องกด Accept License
+ก่อนใช้ `HF_TOKEN` ให้กด accept license ของ:
 
-ก่อนสร้าง token ให้เข้าไป **ยอมรับเงื่อนไข** 2 โมเดลนี้ก่อน:
-
-1. [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1)
-2. [pyannote/segmentation-3.0](https://huggingface.co/pyannote/segmentation-3.0)
-
-จากนั้นสร้าง **Read token** ที่ https://huggingface.co/settings/tokens
+1. `pyannote/speaker-diarization-3.1`
+2. `pyannote/segmentation-3.0`
 
 ---
 
-## 🚀 ขั้นตอนติดตั้ง
+## วิธีติดตั้งที่แนะนำบน Windows
 
-### 1. Clone และเข้าโฟลเดอร์
+### 1. Clone โปรเจค
 
 ```bash
 git clone <repo-url> smartvoice
-cd smartvoice
 ```
 
-### 2. สร้างและเปิด Virtual Environment
+### 2. ใช้ launcher ครั้งแรก
 
 ```powershell
-# Windows (PowerShell)
+run.bat
+```
+
+`run.bat` จะทำให้ครบชุด:
+
+- สร้าง `.venv`
+- สร้าง `.env` จาก `.env.example`
+- ติดตั้ง dependencies และติดตั้ง package แบบ editable
+- ตรวจ Python, PyTorch, CUDA, Ollama
+- เสนอคำสั่งติดตั้ง PyTorch CUDA build ที่เหมาะกับเครื่อง
+- เสนอการติดตั้ง Ollama และดาวน์โหลดโมเดลถ้ายังไม่มี
+- เปิดแอปที่ `http://localhost:8501`
+
+ถ้าต้องการติดตั้งเองแบบ manual ให้ใช้ขั้นตอนถัดไป
+
+---
+
+## วิธีติดตั้งแบบ Manual
+
+### 1. สร้าง virtual environment
+
+```powershell
 python -m venv .venv
 .venv\Scripts\activate
 ```
@@ -49,157 +65,169 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. ติดตั้ง Dependencies
+### 2. ติดตั้ง dependency และ package
 
-```bash
+```powershell
 pip install -r requirements.txt
-```
-
-### 4. แก้ torchaudio ให้ตรงกับ CUDA (สำคัญถ้ามี GPU)
-
-```bash
-pip uninstall torchcodec -y
-pip install torchaudio==2.10.0+cu128 --index-url https://download.pytorch.org/whl/cu128 --no-deps
-```
-
-> เปลี่ยน `cu128` ตามเวอร์ชัน CUDA ที่ติดตั้ง — ถ้าไม่มี GPU ข้ามขั้นนี้ แล้วตั้ง `MOCK_STT=true` ใน `.env`
-
-### 5. ติดตั้งโปรเจคแบบ editable
-
-```bash
 pip install -e . --no-deps
 ```
 
-### 6. ตั้งค่า `.env`
+### 3. ตั้งค่า `.env`
 
 ```powershell
-# Windows
 copy .env.example .env
 ```
 
-```bash
-# Linux / macOS
-cp .env.example .env
-```
-
-เปิดไฟล์ `.env` ใส่อย่างน้อย:
+ค่าหลักที่ควรรู้:
 
 ```env
-HF_TOKEN=hf_xxxxxxxxxxxxxxxxx    # จาก HuggingFace (จำเป็น)
 WHISPER_MODEL=biodatlab/distill-whisper-th-large-v3
+WHISPER_BACKEND=transformers
+WHISPER_DEVICE=auto
+WHISPER_COMPUTE=auto
+MOCK_STT=false
+HF_TOKEN=hf_xxxxxxxxxxxxxxxxx
+OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=scb10x/llama3.1-typhoon2-8b-instruct
+CASE_RECENCY_HOURS=4.0
+PROCESSING_STALE_MINUTES=180
+SMARTVOICE_USERS=
 ```
 
-**สำหรับทดลองระบบแบบไม่ต้อง GPU:** ตั้ง `MOCK_STT=true` เพื่อข้าม STT จริง ใช้ transcript ตัวอย่างแทน
+หมายเหตุ:
 
-### 7. ติดตั้งและรัน Ollama
+- `MOCK_STT=true` ใช้โหมด demo โดยไม่เรียก STT จริง
+- `CASE_RECENCY_HOURS` ใช้ auto-attach สายใหม่เข้ากับเคสเปิดล่าสุดของลูกค้าคนเดิม
+- `PROCESSING_STALE_MINUTES` ใช้ reset งานที่ค้างในสถานะ `processing` หลังแอปถูกปิดกลางทาง
+- `SMARTVOICE_USERS` ถ้าว่าง ระบบจะใช้ demo/audit login; ถ้าตั้งค่าแล้วจะเปิด login แบบ password
+
+### 4. เปิด Ollama
 
 ```bash
 ollama pull scb10x/llama3.1-typhoon2-8b-instruct
-ollama serve                     # เปิด Ollama server ใน terminal แยก
+ollama serve
 ```
 
-### 8. (Optional) Seed Mock Data สำหรับทดลอง
+### 5. Seed mock data ถ้าต้องการ
 
-ถ้ายังไม่มี data ของจริง รันคำสั่งนี้เพื่อใส่ลูกค้าและ warranty ตัวอย่าง:
-
-```bash
+```powershell
 python scripts/seed_mock_data.py
 ```
 
----
-
-## ▶ วิธีเปิดโปรแกรม
-
-### Windows
-
-ดับเบิลคลิก **`run.bat`** หรือพิมพ์:
+### 6. เปิดแอป
 
 ```powershell
-.venv\Scripts\activate
 streamlit run app.py
 ```
 
-### Linux / macOS
+หรือใช้:
 
-```bash
-chmod +x run.sh    # ครั้งแรกเท่านั้น
-./run.sh
+```powershell
+.venv\Scripts\smartvoice
 ```
-
-### หรือใช้คำสั่ง `smartvoice`
-
-```bash
-.venv\Scripts\smartvoice     # Windows
-.venv/bin/smartvoice         # Linux/Mac
-```
-
-เปิดเบราว์เซอร์ไปที่ **http://localhost:8501**
 
 ---
 
-## 🗂 โครงสร้างหน้าเว็บ
+## หน้าเว็บที่มีตอนนี้
 
 | หน้า | หน้าที่ |
 |------|---------|
-| 🏠 **Home** | ภาพรวม, stats เร็ว |
-| 📤 **Admin** | อัปโหลดไฟล์เสียง, สั่ง Process, ดูสถานะ, จัดการเคส |
-| 📊 **Dashboard** | กราฟ Sentiment, Intent, Brand, Agent Performance |
-| 👥 **Customers** | ค้นหาลูกค้า, Warranty lookup |
+| Home | สรุปจำนวนสาย + `Deployment readiness` |
+| Admin | Upload, process, ค้นหา/กรองสาย, bulk delete, เชื่อมลูกค้า, จัดการ/รวมเคส |
+| Dashboard | KPI, charts, anomaly, agent performance, case summary |
+| Customers | ดูลูกค้า, warranty, เคส, และสายที่เชื่อมไว้ |
+| Settings | preset Demo / Real AI, ปรับ model config, ดู readiness checks |
+
+หน้า `Settings` ต้อง login ก่อน และจำกัดให้ `Admin` หรือ `Supervisor`
 
 ---
 
-## 🔧 Troubleshooting
+## ตั้งค่า Authentication
 
-### ❌ `HF_TOKEN` invalid / 401 Unauthorized
-- ตรวจว่าได้กด **Accept** บนหน้า model แล้วทั้ง 2 รุ่น (ดู §1)
-- Token ต้องเป็น **Read** หรือ **Write** — ไม่ใช่ fine-grained ที่จำกัด
-- รีสตาร์ท Streamlit หลังแก้ `.env`
+สร้าง hash:
 
-### ❌ CUDA out of memory
-- ลดไฟล์ audio ให้สั้นลง หรือ
-- ตั้ง `WHISPER_COMPUTE=int8` ใน `.env` (ใช้ memory น้อยกว่า)
-- ลดไฟล์ที่ process พร้อมกันเหลือทีละ 1
-
-### ❌ Ollama: `connection refused`
-- ตรวจว่า `ollama serve` รันอยู่ (ต้องเปิด terminal แยก)
-- ตรวจว่าไม่มีโปรแกรมอื่นใช้ port 11434
-- ดึงโมเดลอีกครั้ง: `ollama pull scb10x/llama3.1-typhoon2-8b-instruct`
-
-### ❌ `No module named 'smartvoice'`
-- รัน `pip install -e . --no-deps` อีกครั้งใน venv ที่ activate อยู่
-
-### ❌ Upload ไฟล์แล้วขึ้น "magic bytes ไม่ตรง"
-- ไฟล์อาจเสียหาย — ลอง convert ด้วย ffmpeg:
-  ```bash
-  ffmpeg -i input.mp3 -ar 16000 output.wav
-  ```
-
-### 📋 ดู Log
-- ไฟล์ log ถูกเก็บที่ `data/logs/smartvoice.log` (หมุนเวียนที่ 5 MB, เก็บ 3 ไฟล์)
-- ปรับระดับ log: ตั้ง `SMARTVOICE_LOG_LEVEL=DEBUG` ใน `.env`
-
----
-
-## 🔁 การรันครั้งถัดไป
-
-หลังติดตั้งเสร็จครั้งแรก ครั้งต่อ ๆ ไปแค่:
-
-```bash
-# 1. เปิด Ollama ใน terminal แยก
-ollama serve
-
-# 2. เปิดโปรแกรม
-run.bat           # Windows
-./run.sh          # Linux/Mac
+```powershell
+python scripts/make_password_hash.py admin Admin
 ```
 
+นำค่าที่ได้ไปใส่ใน `.env`:
+
+```env
+SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
+```
+
+รองรับหลาย user โดยคั่นด้วย `;`
+
 ---
 
-## 📚 เอกสารอื่น
+## GPU / CUDA
 
-- [`README.md`](README.md) — ภาพรวมโปรเจค
-- [`docs/user_manual.md`](docs/user_manual.md) — คู่มือผู้ใช้ธุรกิจ
-- [`docs/architecture.md`](docs/architecture.md) — โครงสร้างระบบ + Data Flow
-- [`docs/database_design.md`](docs/database_design.md) — ER Diagram + Data Dictionary
-- [`CHANGELOG.md`](CHANGELOG.md) — ประวัติการเปลี่ยนแปลง
+บน Windows ให้รัน `run.bat` ก่อน เพราะ launcher จะตรวจ CUDA และแนะนำ wheel tag ที่ตรงกับเครื่องให้เอง
+
+ถ้าจะติดตั้งเอง ตัวอย่างรูปแบบคำสั่งคือ:
+
+```powershell
+.venv\Scripts\python.exe -m pip uninstall -y torch torchvision torchaudio
+.venv\Scripts\python.exe -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+```
+
+เปลี่ยน `cu128` ให้ตรงกับ CUDA ที่เครื่องรองรับ
+
+---
+
+## Troubleshooting
+
+### `HF_TOKEN` invalid / 401
+
+- ตรวจว่า accept license ของ pyannote ทั้ง 2 model แล้ว
+- รีสตาร์ทแอปหลังแก้ `.env`
+
+### Ollama ยังไม่พร้อม
+
+- เปิด `ollama serve`
+- ตรวจว่ามีโมเดลที่ตั้งใน `OLLAMA_MODEL`
+- หน้า Home และ Settings จะแสดง readiness checks ให้ดูได้ทันที
+
+### CUDA ใช้ไม่ได้
+
+- รัน `run.bat` เพื่อดู environment check
+- ตรวจ `WHISPER_DEVICE`
+- ถ้าเครื่องยังไม่พร้อม ใช้ `MOCK_STT=true` ชั่วคราว
+
+### Upload แล้วไฟล์ไม่ผ่าน
+
+- รองรับเฉพาะ `.wav` และ `.mp3`
+- ไฟล์ต้องไม่เกิน 100 MB
+- ถ้าเจอ `magic bytes ไม่ตรง` ให้ตรวจไฟล์หรือแปลงใหม่ด้วย `ffmpeg`
+
+### งานค้างในสถานะ processing
+
+- ระบบจะ reset งานเก่าที่ค้างเกิน `PROCESSING_STALE_MINUTES` ตอนเปิดหน้าใหม่
+- ถ้าต้องการปิด behavior นี้ ให้ตั้ง `PROCESSING_STALE_MINUTES=0`
+
+### ดู log
+
+- ไฟล์อยู่ที่ `data/logs/smartvoice.log`
+- ตั้ง `SMARTVOICE_LOG_LEVEL=DEBUG` ใน `.env` เมื่อต้องการรายละเอียดเพิ่ม
+
+---
+
+## Test Suite
+
+```powershell
+& ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
+```
+
+สถานะล่าสุดที่ยืนยันแล้ว: `110 passed`
+
+---
+
+## เอกสารที่เกี่ยวข้อง
+
+- [`README.md`](README.md)
+- [`ONE_CLICK_RUN.md`](ONE_CLICK_RUN.md)
+- [`docs/user_manual.md`](docs/user_manual.md)
+- [`docs/architecture.md`](docs/architecture.md)
+- [`docs/database_design.md`](docs/database_design.md)
+- [`docs/OMAZZ_RELEASE_CHECKLIST.md`](docs/OMAZZ_RELEASE_CHECKLIST.md)
+- [`CHANGELOG.md`](CHANGELOG.md)

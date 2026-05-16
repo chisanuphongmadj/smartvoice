@@ -5,9 +5,17 @@ Use this before sending SmartVoice to Omazz or running a live demo.
 ## Must do before sharing
 
 - Remove real customer audio from `data/raw_audio/`.
-- Remove local databases such as `data/smartvoice.db` unless the data is fully anonymized.
+- Remove local databases such as `data/smartvoice.db` unless fully anonymized.
 - Remove temporary reports such as `_anomaly_report.txt`.
-- Confirm `.env` is not included in the ZIP or commit.
+- Confirm `.env` is excluded from the ZIP/commit.
+- Confirm `data/models`, `data/logs`, `.venv`, and `.git` are excluded from the handoff package.
+- Run the test suite:
+
+```powershell
+& ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
+```
+
+- Open Home and verify `Deployment readiness`.
 - Create demo users with hashed passwords:
 
 ```bash
@@ -24,7 +32,10 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 
 For a laptop without GPU or HuggingFace access:
 
-Open `Settings`, click `Use Demo Laptop Mode`, then restart the app.
+1. Log in as `Admin` or `Supervisor`.
+2. Open `Settings`.
+3. Click `Use Demo Laptop Mode`.
+4. Restart the app.
 
 For a realistic Omazz demo:
 
@@ -48,15 +59,18 @@ Frame the system as:
 
 Recommended demo flow:
 
-1. Open the home page and expand `Deployment readiness`.
+1. Open Home and expand `Deployment readiness`.
 2. Log in as Admin.
 3. Upload one anonymized Omazz warranty call.
 4. Process the call and show the tagged transcript.
-5. Show the dashboard: sentiment, issue keywords, brand mentions, case management, and next actions.
-6. Show customer and warranty linking.
+5. Show how the system auto-links customer/warranty from the filename phone number.
+6. Show case grouping, next action owner, and case merge if relevant.
+7. Open Dashboard for sentiment, issue keywords, anomaly, agent performance, and case summary.
+8. Open Customers for warranty history and linked call context.
+9. Open Settings briefly to show Demo / Real AI switching.
 
 ## Privacy notes
 
-- Audio files and SQLite databases are local runtime data and are ignored by Git.
+- Audio files and SQLite databases are local runtime data and ignored by Git.
 - Keep HuggingFace tokens and passwords only in `.env`.
-- If sharing a ZIP, exclude `.venv`, `.git`, `data/raw_audio`, `data/models`, `data/logs`, and local DB files.
+- Do not ship real audio, real customer DBs, logs, or temporary reports in a demo ZIP.

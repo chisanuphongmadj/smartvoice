@@ -1,41 +1,40 @@
 # SmartVoice one-click run guide
 
-This project can be shared with another machine as a normal Git checkout or a ZIP file.
-The launcher will create the virtual environment, install Python packages, copy `.env.example`
-to `.env`, and open Streamlit automatically.
+คู่มือนี้ใช้ตอนส่งโปรเจคให้เครื่องอื่นหรือเตรียมเครื่อง demo แบบเร็วที่สุด
 
 ## Minimum requirements
 
-- Windows 10/11, macOS, or Linux
-- Internet access on the first run
-- 10 GB or more free disk space for Python packages and AI models
+- Windows 10/11, macOS, หรือ Linux
+- Internet access ในการรันครั้งแรก
+- พื้นที่ว่างอย่างน้อย 10 GB สำหรับ Python packages และ AI models
 
-On Windows, `run.bat` can offer to install Python 3.11 automatically if no supported
-Python is available yet. On macOS/Linux, install Python 3.10 or 3.11 first.
+บน Windows: `run.bat` สามารถเสนอติดตั้ง Python 3.11 ให้อัตโนมัติได้ถ้ายังไม่มี
+สำหรับ macOS/Linux: ติดตั้ง Python 3.10 หรือ 3.11 ก่อน
 
-For real AI analysis, also install:
+สำหรับ Real AI mode ยังต้องมี:
 
-- Ollama: https://ollama.com
-- HuggingFace token with access to `pyannote/speaker-diarization-3.1` and `pyannote/segmentation-3.0`
+- Ollama
+- HuggingFace token ที่เข้าถึง `pyannote/speaker-diarization-3.1` และ `pyannote/segmentation-3.0`
 
-Before sending the project to another company, follow `docs/OMAZZ_RELEASE_CHECKLIST.md`.
+ก่อนส่งโปรเจคให้ภายนอก ให้ทำตาม [`docs/OMAZZ_RELEASE_CHECKLIST.md`](docs/OMAZZ_RELEASE_CHECKLIST.md)
 
 ## Windows
 
-1. Download or clone this project.
-2. Double-click `run.bat`.
-3. Accept the Python 3.11 installer prompt if the machine does not already have
-   Python 3.10 or 3.11.
+1. ดาวน์โหลดหรือ clone โปรเจค
+2. ดับเบิลคลิก `run.bat`
+3. ตอบรับ prompt ติดตั้ง Python 3.11 ถ้าเครื่องยังไม่มี Python 3.10 หรือ 3.11
 
-First run can take several minutes because it may install Python, Python packages,
-and AI models.
-After that, double-clicking `run.bat` starts the app.
+รอบแรกจะใช้เวลาหลายนาที (อาจติดตั้ง Python, Python packages และ AI models)
+หลังจากนั้น ดับเบิลคลิก `run.bat` เพื่อเปิดแอปได้เลย
 
-`run.bat` also prints a local environment check on startup. If it detects an NVIDIA GPU
-but the current virtual environment cannot use CUDA, it prints the recommended PyTorch
-reinstall commands for that machine and asks whether to install the recommended CUDA
-build immediately. If Ollama or the configured Ollama model is missing, it also asks
-whether to install Ollama for Windows and download the required model.
+รอบแรก launcher จะ:
+
+- สร้าง `.venv`
+- ติดตั้ง dependencies
+- สร้าง `.env`
+- ตรวจ Python / PyTorch / CUDA / Ollama
+- เสนอการติดตั้ง CUDA-enabled PyTorch, Ollama, และโมเดลที่ขาด
+- เปิดแอปที่ `http://localhost:8501`
 
 ## macOS / Linux
 
@@ -46,38 +45,58 @@ chmod +x run.sh
 
 ## Real AI mode
 
-After the first run creates `.env`, edit it and set:
+หลัง launcher สร้าง `.env` แล้ว ให้ตั้งอย่างน้อย:
 
 ```env
+MOCK_STT=false
 HF_TOKEN=hf_your_token_here
 OLLAMA_MODEL=scb10x/llama3.1-typhoon2-8b-instruct
-MOCK_STT=false
 ```
 
-Then install the Ollama model once:
+ติดตั้งโมเดล Ollama ครั้งเดียว:
 
 ```bash
 ollama pull scb10x/llama3.1-typhoon2-8b-instruct
 ```
 
+เปิดหน้า Home แล้วขยาย `Deployment readiness` เพื่อตรวจสถานะระบบ
+
 ## Demo mode
 
-For a machine without GPU or without HuggingFace access:
+ถ้าเครื่องไม่มี GPU หรือยังไม่มี HuggingFace access:
 
-1. Open the app.
-2. Go to `Settings`.
-3. Click `Use Demo Laptop Mode`.
-4. Restart with `run.bat`.
+1. Login ใน sidebar
+2. เข้า `Settings`
+3. เลือก `Use Demo Laptop Mode`
+4. Restart แอป
 
-The app will still open, and uploads can be tested with mock transcripts.
+ในโหมดนี้ระบบยังเปิดใช้งาน UI และ flow upload ได้ โดยใช้ mock transcript แทน STT จริง
+
+## Authentication
+
+ถ้าต้องการ password login แทน demo/audit login:
+
+```bash
+python scripts/make_password_hash.py admin Admin
+```
+
+จากนั้นนำผลลัพธ์ไปใส่ใน `.env`:
+
+```env
+SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
+```
 
 ## Packaging options
 
-For the easiest handoff to non-technical users:
+ก่อน zip โปรเจค ให้ตัดสิ่งเหล่านี้ออก:
 
-1. Zip the project folder, excluding `.venv`, `.git`, `.env`, `data/raw_audio`, `data/models`, `data/logs`, and local DB files.
-2. Ask the user to unzip it.
-3. Ask them to double-click `run.bat`.
+- `.venv`
+- `.git`
+- `.env`
+- `data/raw_audio`
+- `data/models`
+- `data/logs`
+- local DB เช่น `data/smartvoice.db`
+- temporary reports เช่น `_anomaly_report.txt`
 
-For a fully self-contained installer, use Docker or PyInstaller later. Docker is usually more reliable
-for this project because Torch, pyannote, CUDA, and Ollama dependencies are heavy.
+ถ้าต้องการ installer แบบ self-contained จริง ๆ ให้พิจารณา Docker หรือ PyInstaller ภายหลัง โดย Docker มักเสถียรกว่าสำหรับ stack ที่มี Torch, pyannote, CUDA, และ Ollama

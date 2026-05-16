@@ -1,151 +1,165 @@
 # SmartVoice
 
-AI-powered Call Center Analytics — transcribes Thai audio, diarizes speakers, and runs LLM quality analysis.
+AI-powered Call Center Analytics สำหรับสายภาษาไทย: รับไฟล์เสียง, ถอดเสียง, แยกผู้พูด, วิเคราะห์คุณภาพการสนทนาด้วย LLM, และจัดกลุ่มเคสลูกค้าในเครื่องเดียว
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|------------|
-| UI | Streamlit (multi-page) |
+| UI | Streamlit แบบ multi-page |
 | Database | SQLite 3 |
-| STT (default) | `biodatlab/distill-whisper-th-large-v3` via `faster-whisper` / CTranslate2 |
-| STT (alternative) | `transformers` หรือ `faster-whisper` — `large-v3` และโมเดลอื่น ๆ |
+| STT (default) | `biodatlab/distill-whisper-th-large-v3` ผ่าน `transformers` |
+| STT (alternative) | `faster-whisper` สำหรับ `large-v3`, `large-v3-turbo`, หรือโมเดล CT2 native |
 | Speaker Diarization | `pyannote/speaker-diarization-3.1` |
-| LLM | Ollama — `scb10x/llama3.1-typhoon2-8b-instruct` |
+| LLM | Ollama + `scb10x/llama3.1-typhoon2-8b-instruct` |
+
+## Current Capabilities
+
+- Upload `.wav` / `.mp3`, ตรวจ magic bytes, จำกัดขนาดไฟล์ 100 MB, และ deduplicate ด้วย SHA-256
+- ดึงเบอร์โทรจากชื่อไฟล์, เชื่อมลูกค้า/รับประกันอัตโนมัติ, และบันทึกผู้ upload เพื่อ audit
+- ถอดเสียง + diarization + speaker correction แบบหลายชั้น โดยผสม LLM กับ heuristic rules ภาษาไทย
+- วิเคราะห์ 4 ด้านแยกกัน: summary/topic, sentiment, agent QA, anomaly
+- จัดกลุ่มเคสอัตโนมัติด้วย recency short-circuit ก่อนใช้ LLM match
+- มี Dashboard, customer/warranty view, case management, case merge, Settings, login, และ deployment readiness checks
 
 ## Project Structure
 
-```
+```text
 smartvoice/
-├── app.py                        # Streamlit entry point (home page)
-├── pages/                        # Streamlit multi-page
-│   ├── 1_📤_Admin.py            # Upload & process audio files
-│   ├── 2_📊_Dashboard.py        # Analytics dashboard
-│   └── 3_👥_Customers.py        # Customer & warranty management
-├── smartvoice/                   # Business logic package
-│   ├── __init__.py               # Package init (loads .env)
-│   ├── config.py                 # Centralized environment config
-│   ├── ui_helpers.py             # Shared CSS, badges, processing launchers
-│   ├── db.py                     # SQLite schema, migrations, CRUD
-│   ├── file_manager.py           # Audio file saving + SHA-256 deduplication
-│   ├── ollama_client.py          # Ollama/Typhoon LLM client
-│   ├── prompts.py                # LLM prompt templates
-│   ├── pipeline.py               # Full processing orchestration
-│   ├── whisperx_client.py        # Backward-compat wrapper → stt/
-│   └── stt/                      # Speech-to-Text sub-package
-│       ├── __init__.py           # Public API: transcribe_diarized()
-│       ├── audio.py              # Audio loading, resampling, noise reduction
-│       ├── transcribe.py         # HF transformers + faster-whisper backends
-│       ├── diarize.py            # Pyannote diarization + speaker assignment
-│       └── orchestrator.py       # Ties audio → transcribe → diarize
+├── app.py                         # หน้า Home + deployment readiness
+├── pages/
+│   ├── 1_📤_Admin.py              # Upload, process, case management
+│   ├── 2_📊_Dashboard.py          # Analytics dashboard
+│   ├── 3_👥_Customers.py          # Customer + warranty browse
+│   └── 4_Settings.py              # Demo/AI presets + readiness checks
+├── smartvoice/
+│   ├── auth.py                    # Sidebar login + PBKDF2 helpers
+│   ├── cli.py                     # `smartvoice` console entrypoint
+│   ├── config.py                  # Environment config ทั้งหมด
+│   ├── db.py                      # SQLite schema, migrations, CRUD
+│   ├── env_settings.py            # อ่าน/เขียน `.env` จากหน้า Settings
+│   ├── file_manager.py            # Upload validation + SHA-256 dedup
+│   ├── logger.py                  # Rotating logger
+│   ├── ollama_client.py           # LLM client + JSON parsing
+│   ├── pipeline.py                # Core orchestration
+│   ├── preflight.py               # Deployment readiness checks
+│   ├── prompts.py                 # Prompt templates
+│   ├── ui_helpers.py              # CSS, login, background processing
+│   └── stt/
+│       ├── audio.py               # Load, resample, denoise
+│       ├── diarize.py             # pyannote wrapper
+│       ├── orchestrator.py        # Audio → STT → diarization
+│       └── transcribe.py          # `transformers` + `faster-whisper`
 ├── scripts/
-│   ├── seed_mock_data.py         # Seed mock customers + warranty data
-│   └── generate_er_diagram.py    # Generate ER diagram PNG
-├── data/                         # Runtime data (gitignored)
-│   ├── models/                   # CTranslate2 converted models
-│   ├── raw_audio/                # Uploaded audio files
-│   └── smartvoice.db             # SQLite database (auto-created)
+│   ├── extract_pdf.py
+│   ├── generate_er_diagram.py
+│   ├── make_password_hash.py
+│   └── seed_mock_data.py
+├── tests/                          # pytest suite
 ├── docs/
-│   ├── database_design.md        # ER Diagram (Mermaid) + Data Dictionary
-│   └── er_diagram.png            # ER Diagram PNG for reports
+│   ├── architecture.md
+│   ├── database_design.md
+│   ├── OMAZZ_RELEASE_CHECKLIST.md
+│   ├── report_corrections.md
+│   └── user_manual.md
+├── data/                           # runtime data (gitignored)
+│   ├── logs/
+│   ├── models/
+│   ├── raw_audio/
+│   └── smartvoice.db
+├── CHANGELOG.md
+├── ONE_CLICK_RUN.md
+├── SETUP.md
 ├── requirements.txt
-├── .env.example
-└── README.md
+└── .env.example
 ```
 
 ## Database Tables
 
 | Table | คำอธิบาย |
 |-------|----------|
-| `calls` | บันทึกการโทร + ผลวิเคราะห์ AI |
+| `calls` | ไฟล์เสียง, transcript, ผลวิเคราะห์ AI, สถานะ, audit uploader, และ `case_id` |
 | `customers` | ข้อมูลลูกค้า |
 | `warranty_registrations` | ทะเบียนรับประกันสินค้า |
-| `call_customer_links` | เชื่อมการโทรกับลูกค้า/warranty |
+| `call_customer_links` | ความสัมพันธ์ระหว่างสาย, ลูกค้า, และ warranty |
+| `cases` | กลุ่มสายของลูกค้าคนเดียวกันในเรื่องเดียวกัน |
 
-## Setup
+## Quick Start
 
-### 1. Install dependencies
+### Windows
 
-```bash
+```powershell
+run.bat
+```
+
+ตัว launcher จะสร้าง `.venv`, ติดตั้ง dependency, สร้าง `.env`, ตรวจ CUDA/Ollama, และเปิด `http://localhost:8501`
+
+### Manual run
+
+```powershell
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### 2. Configure environment
-
-```bash
+pip install -e . --no-deps
 copy .env.example .env
+streamlit run app.py
 ```
 
-แก้ไข `.env`:
+ดูรายละเอียดเต็มใน [`SETUP.md`](SETUP.md) และคู่มือส่งต่อเครื่องใน [`ONE_CLICK_RUN.md`](ONE_CLICK_RUN.md)
+
+## Core Environment Variables
 
 ```env
 WHISPER_MODEL=biodatlab/distill-whisper-th-large-v3
 WHISPER_BACKEND=transformers
 WHISPER_DEVICE=auto
 WHISPER_COMPUTE=auto
-WHISPER_BEAM_SIZE=5
-WHISPER_HOTWORDS=Restonic,Trade-in,หาดใหญ่,สุราษฎร์ธานี,อุทกภัย,ประกันโครงสร้าง,ภาคใต้,ทางห้าง,จัดโปร,แห้งแค่ข้างนอก,มิน่า
-DENOISE_ENABLED=true
-DENOISE_PROP_DECREASE=0.35
-HF_TOKEN=your_huggingface_token   # ต้องขอสิทธิ์ pyannote/speaker-diarization-3.1
+MOCK_STT=false
+HF_TOKEN=
+OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=scb10x/llama3.1-typhoon2-8b-instruct
+CASE_RECENCY_HOURS=4.0
+SMARTVOICE_USERS=
+PROCESSING_STALE_MINUTES=180
 ```
-
-### 3. Start Ollama
-
-```bash
-ollama pull scb10x/llama3.1-typhoon2-8b-instruct
-ollama serve
-```
-
-### 4. Seed mock data (optional)
-
-```bash
-.venv\Scripts\python.exe scripts/seed_mock_data.py
-```
-
-### 5. Run the app
-
-```bash
-streamlit run app.py
-```
-
-## STT Modes
-
-| `MOCK_STT` | `WHISPER_BACKEND` | `WHISPER_MODEL` | HF_TOKEN | Mode |
-|-----------|-------------------|-----------------|----------|------|
-| `true` | any | any | any | Mock transcripts (fast, no GPU) |
-| `false` | `transformers` | `biodatlab/...` | set | Recommended for Thai accuracy-first transcription + pyannote diarization |
-| `false` | `faster-whisper` | `large-v3` หรือ native CT2 model | set | faster-whisper + pyannote diarization |
-| `false` | `auto` | any | set | Auto-selects a backend, but for `biodatlab/...` accuracy work prefer `transformers` |
-| `false` | any | any | empty | Transcription only (all "Speaker 0") |
 
 ## Processing Pipeline
 
-```
+```text
 Audio (.wav/.mp3)
-    ↓ load + resample 16 kHz     → numpy array
-    ↓ noisereduce                 → cleaned audio
-    ↓ Whisper (HF or FW)         → word-level timestamps
-    ↓ pyannote 3.1               → speaker labels per word
-    ↓ group by speaker            → Agent / Customer segments
-    ↓ Typhoon2 8B (LLM)          → JSON analysis
-    ↓ SQLite                     → Streamlit UI
+  → validate + save + optional phone auto-link
+  → load / resample / denoise
+  → Whisper STT + pyannote diarization
+  → heuristic cleanup + transcript cleanup LLM
+  → speaker correction LLM + deterministic Thai role rules
+  → LLM analysis 4 calls
+  → SQLite save
+  → auto case assignment
+  → Streamlit UI
 ```
 
 ## LLM Output Fields
 
 | Field | Description |
 |-------|-------------|
-| `speaker_mapping` | SPEAKER_XX → Agent/Customer |
+| `summary` | สรุปบทสนทนา |
 | `topic` | หัวข้อหลักที่ลูกค้าติดต่อ |
-| `customer_sentiment` | positive / neutral / negative |
-| `summary` | สรุปบทสนทนา 1-2 ประโยค |
-| `agent_performance` | politeness, problem_solving, overall_score (1-10) |
-| `keywords` | คำสำคัญในบทสนทนา |
-| `brand_mentions` | แบรนด์ที่พูดถึง |
-| `platform_mentions` | แพลตฟอร์มที่พูดถึง |
-| `anomaly_detected` | true / false |
-| `anomaly_reason` | รายละเอียดความผิดปกติ |
+| `sentiment` | `positive` / `neutral` / `negative` |
+| `sentiment_reason` | เหตุผลประกอบ sentiment |
+| `agent_performance` | `politeness`, `problem_solving`, `overall_score`, `next_action`, `next_action_owner` |
+| `keywords` | คำสำคัญ |
+| `brand_mentions` | แบรนด์ที่ถูกพูดถึง |
+| `platform_mentions` | แพลตฟอร์มหรือช่องทางที่ถูกพูดถึง |
+| `anomaly_detected` | พบ anomaly หรือไม่ |
+| `anomaly_reason` | เหตุผลพร้อมหลักฐานจาก transcript |
+| `anomaly_severity` | `low` / `medium` / `high` |
+
+## Tests
+
+ชุดทดสอบปัจจุบัน:
+
+```powershell
+& ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
+```
+
+ผลล่าสุดที่ยืนยันแล้ว: `110 passed`

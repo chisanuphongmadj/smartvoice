@@ -1,8 +1,23 @@
 # รายการแก้ไขรายงาน — ปรับให้ตรงกับระบบปัจจุบัน
 
 > เอกสารนี้รวบรวมจุดที่ต้องแก้ไขในรายงานบทที่ 1, 2 และ 3  
-> โดยอ้างอิงจาก source code จริงในโปรเจกต์ SmartVoice ณ วันที่ 2 เมษายน 2569  
+> โดยอ้างอิงจาก source code จริงในโปรเจกต์ SmartVoice ณ วันที่ 16 พฤษภาคม 2569
 > **วิธีใช้**: คัดลอกข้อความ "✅ แก้เป็น" ไปแทนที่ข้อความ "❌ ข้อความเดิม" ในรายงาน
+
+---
+
+## อัปเดตเพิ่มเติมจากสถานะปัจจุบัน
+
+ถ้าจะให้รายงานสะท้อนโค้ดเวอร์ชันปัจจุบันครบถ้วน ควรเพิ่มประเด็นต่อไปนี้ด้วย:
+
+- ระบบมีหน้า `Settings` สำหรับสลับ Demo / Real AI และแก้ค่าหลักใน `.env`
+- มี `Deployment readiness` checks บนหน้า Home และ Settings
+- มี sidebar login แบบ PBKDF2 ผ่าน `SMARTVOICE_USERS` พร้อม demo/audit fallback
+- ตาราง `calls` มี `uploaded_by` และ `uploaded_by_role` สำหรับ audit trail
+- auto case assignment มี recency short-circuit ผ่าน `CASE_RECENCY_HOURS` ก่อนให้ LLM match
+- ระบบ recover งานที่ค้างในสถานะ `processing` ผ่าน `PROCESSING_STALE_MINUTES`
+- หน้า Admin รองรับ search/filter/sort, bulk delete, orphan-case cleanup, และ merge case
+- ชุดทดสอบปัจจุบันยืนยันแล้ว `110 passed`
 
 ---
 
