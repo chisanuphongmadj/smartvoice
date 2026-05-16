@@ -7,7 +7,10 @@ import shutil
 import sys
 from dataclasses import dataclass
 
+import httpx
 import requests
+from huggingface_hub import get_hf_file_metadata, hf_hub_url
+from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
 
 from smartvoice.auth import is_auth_configured
 from smartvoice.config import HF_TOKEN, MOCK_STT, OLLAMA_BASE_URL, OLLAMA_MODEL
@@ -19,6 +22,12 @@ class CheckResult:
     ok: bool
     detail: str
     severity: str = "warning"
+
+
+_PYANNOTE_REQUIRED_REPOS = (
+    "pyannote/speaker-diarization-3.1",
+    "pyannote/segmentation-3.0",
+)
 
 
 def recommend_cuda_wheel_tag(cuda_version: str | None) -> str | None:
@@ -77,6 +86,36 @@ def ollama_setup_lines() -> list[str]:
     ]
 
 
+def get_pyannote_access_readiness() -> tuple[bool, str]:
+    if MOCK_STT:
+        return True, "not required in demo mode"
+    if not HF_TOKEN:
+        return False, "not checked; add HF_TOKEN first"
+
+    for repo_id in _PYANNOTE_REQUIRED_REPOS:
+        try:
+            get_hf_file_metadata(
+                hf_hub_url(repo_id, "config.yaml"),
+                token=HF_TOKEN,
+                timeout=3,
+            )
+        except GatedRepoError:
+            return False, f"access not granted for `{repo_id}`; accept the HuggingFace license first"
+        except RepositoryNotFoundError:
+            return False, f"access not verified for `{repo_id}`; check token and accepted license"
+        except HfHubHTTPError as exc:
+            if getattr(exc.response, "status_code", None) in {401, 403}:
+                return False, f"access not granted for `{repo_id}`; check token and accepted license"
+            return False, f"could not verify `{repo_id}`: {exc.__class__.__name__}"
+        except httpx.ConnectError:
+            return False, "could not reach HuggingFace; check internet, firewall, or proxy settings"
+        except httpx.TimeoutException:
+            return False, "HuggingFace check timed out; retry when the network is stable"
+        except Exception as exc:
+            return False, f"could not verify `{repo_id}`: {exc.__class__.__name__}"
+    return True, "ready for gated pyannote models"
+
+
 def run_preflight_checks() -> list[CheckResult]:
     """Return high-signal setup checks shown on the home page."""
     checks: list[CheckResult] = []
@@ -91,6 +130,13 @@ def run_preflight_checks() -> list[CheckResult]:
     ))
 
     checks.append(CheckResult(
+        "Speech-to-text mode",
+        not MOCK_STT,
+        "real AI mode" if not MOCK_STT else "demo mode enabled; real STT and diarization are skipped",
+        "warning",
+    ))
+
+    checks.append(CheckResult(
         "Authentication",
         is_auth_configured(),
         "SMARTVOICE_USERS is configured" if is_auth_configured()
@@ -101,9 +147,14 @@ def run_preflight_checks() -> list[CheckResult]:
     checks.append(CheckResult(
         "HuggingFace token",
         bool(HF_TOKEN) or MOCK_STT,
-        "ready" if HF_TOKEN else "missing; diarization is skipped unless MOCK_STT=true",
+        "not required in demo mode" if MOCK_STT
+        else "ready" if HF_TOKEN
+        else "missing; diarization falls back to Speaker 0",
         "warning",
     ))
+
+    pyannote_ready, detail = get_pyannote_access_readiness()
+    checks.append(CheckResult("Pyannote access", pyannote_ready, detail, "warning"))
 
     ollama_binary = shutil.which("ollama")
     checks.append(CheckResult(

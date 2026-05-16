@@ -30,8 +30,8 @@ AI-powered Call Center Analytics — transcribes Thai audio, diarizes speakers, 
 |-----------|------------|
 | UI | Streamlit (multi-page) |
 | Database | SQLite 3 |
-| STT (default) | `biodatlab/whisper-th-large-v3-combined` via HuggingFace transformers |
-| STT (alternative) | `faster-whisper` — `large-v3` and other standard models |
+| STT (default) | `biodatlab/distill-whisper-th-large-v3` via `faster-whisper` / CTranslate2 |
+| STT (alternative) | `transformers` หรือ `faster-whisper` — `large-v3` และโมเดลอื่น ๆ |
 | Speaker Diarization | `pyannote/speaker-diarization-3.1` |
 | LLM | Ollama — `scb10x/llama3.1-typhoon2-8b-instruct` |
 
@@ -103,8 +103,14 @@ copy .env.example .env
 แก้ไข `.env`:
 
 ```env
-WHISPER_MODEL=biodatlab/whisper-th-large-v3-combined   # หรือ large-v3 สำหรับ faster-whisper
+WHISPER_MODEL=biodatlab/distill-whisper-th-large-v3
+WHISPER_BACKEND=transformers
 WHISPER_DEVICE=auto
+WHISPER_COMPUTE=auto
+WHISPER_BEAM_SIZE=5
+WHISPER_HOTWORDS=Restonic,Trade-in,หาดใหญ่,สุราษฎร์ธานี,อุทกภัย,ประกันโครงสร้าง,ภาคใต้,ทางห้าง,จัดโปร,แห้งแค่ข้างนอก,มิน่า
+DENOISE_ENABLED=true
+DENOISE_PROP_DECREASE=0.35
 HF_TOKEN=your_huggingface_token   # ต้องขอสิทธิ์ pyannote/speaker-diarization-3.1
 OLLAMA_MODEL=scb10x/llama3.1-typhoon2-8b-instruct
 ```
@@ -130,12 +136,13 @@ streamlit run app.py
 
 ## STT Modes
 
-| `MOCK_STT` | `WHISPER_MODEL` | HF_TOKEN | Mode |
-|-----------|-----------------|----------|------|
-| `true` | any | any | Mock transcripts (fast, no GPU) |
-| `false` | `biodatlab/...` | set | HF transformers + pyannote diarization |
-| `false` | `large-v3` etc. | set | faster-whisper + pyannote diarization |
-| `false` | any | empty | Transcription only (all "Speaker 0") |
+| `MOCK_STT` | `WHISPER_BACKEND` | `WHISPER_MODEL` | HF_TOKEN | Mode |
+|-----------|-------------------|-----------------|----------|------|
+| `true` | any | any | any | Mock transcripts (fast, no GPU) |
+| `false` | `transformers` | `biodatlab/...` | set | Recommended for Thai accuracy-first transcription + pyannote diarization |
+| `false` | `faster-whisper` | `large-v3` หรือ native CT2 model | set | faster-whisper + pyannote diarization |
+| `false` | `auto` | any | set | Auto-selects a backend, but for `biodatlab/...` accuracy work prefer `transformers` |
+| `false` | any | any | empty | Transcription only (all "Speaker 0") |
 
 ## Processing Pipeline
 

@@ -10,24 +10,54 @@ echo ========================================
 echo.
 
 set "PY_CMD="
+set "PY311_INSTALLER_VERSION=3.11.9"
+set "PY311_INSTALLER_URL=https://www.python.org/ftp/python/%PY311_INSTALLER_VERSION%/python-%PY311_INSTALLER_VERSION%-amd64.exe"
 where py >nul 2>nul
 if not errorlevel 1 (
     py -3.11 --version >nul 2>nul && set "PY_CMD=py -3.11"
     if not defined PY_CMD py -3.10 --version >nul 2>nul && set "PY_CMD=py -3.10"
-    if not defined PY_CMD py -3 --version >nul 2>nul && set "PY_CMD=py -3"
 )
 
+if not defined PY_CMD if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set PY_CMD="%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+if not defined PY_CMD if exist "%LOCALAPPDATA%\Programs\Python\Python310\python.exe" set PY_CMD="%LOCALAPPDATA%\Programs\Python\Python310\python.exe"
+if not defined PY_CMD if exist "%ProgramFiles%\Python311\python.exe" set PY_CMD="%ProgramFiles%\Python311\python.exe"
+if not defined PY_CMD if exist "%ProgramFiles%\Python310\python.exe" set PY_CMD="%ProgramFiles%\Python310\python.exe"
+
+set "PATH_PY_VERSION="
 if not defined PY_CMD (
     where python >nul 2>nul
-    if not errorlevel 1 set "PY_CMD=python"
+    if not errorlevel 1 (
+        for /f "delims=" %%A in ('call python -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))"' ) do set "PATH_PY_VERSION=%%A"
+        if "%PATH_PY_VERSION%"=="3.10" set "PY_CMD=python"
+        if "%PATH_PY_VERSION%"=="3.11" set "PY_CMD=python"
+    )
 )
 
 if not defined PY_CMD (
-    echo Python was not found.
-    echo Install Python 3.10 or 3.11 from https://www.python.org/downloads/
-    echo Make sure "Add python.exe to PATH" is checked during install.
-    pause
-    exit /b 1
+    echo Python 3.10 or 3.11 was not found.
+    echo SmartVoice can install Python 3.11 for this Windows user.
+    echo.
+    choice /c YN /m "Install Python 3.11 now"
+    if errorlevel 2 (
+        echo.
+        echo Install Python 3.11 from https://www.python.org/downloads/ and run this launcher again.
+        pause
+        exit /b 1
+    ) else (
+        echo.
+        echo Downloading and installing Python 3.11...
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "$installer = Join-Path $env:TEMP 'python-%PY311_INSTALLER_VERSION%-amd64.exe'; Invoke-WebRequest -Uri '%PY311_INSTALLER_URL%' -OutFile $installer; Start-Process -FilePath $installer -ArgumentList '/quiet InstallAllUsers=0 PrependPath=0 Include_launcher=1 Include_test=0' -Wait"
+        if errorlevel 1 goto error
+        where py >nul 2>nul
+        if not errorlevel 1 py -3.11 --version >nul 2>nul && set "PY_CMD=py -3.11"
+        if not defined PY_CMD if exist "%LOCALAPPDATA%\Programs\Python\Python311\python.exe" set PY_CMD="%LOCALAPPDATA%\Programs\Python\Python311\python.exe"
+        if not defined PY_CMD (
+            echo Python 3.11 installation finished, but the launcher could not find it yet.
+            echo Restart this launcher and try again.
+            pause
+            exit /b 1
+        )
+    )
 )
 
 if not exist ".venv\Scripts\python.exe" (
@@ -59,10 +89,10 @@ echo Installing SmartVoice package...
 "%VENV_PY%" -m pip install -e . --no-deps
 if errorlevel 1 goto error
 
-for /f "delims=" %%A in ('"%VENV_PY%" -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))"' ) do set "PY_VERSION=%%A"
-for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.__version__)"' ) do set "TORCH_VERSION=%%A"
-for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.version.cuda or '')"' ) do set "TORCH_CUDA_VERSION=%%A"
-for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.cuda.is_available())"' ) do set "TORCH_CUDA_AVAILABLE=%%A"
+for /f "delims=" %%A in ('call "%VENV_PY%" -c "import sys; print(str(sys.version_info.major) + '.' + str(sys.version_info.minor))"' ) do set "PY_VERSION=%%A"
+for /f "delims=" %%A in ('call "%VENV_PY%" -c "import torch; print(torch.__version__)"' ) do set "TORCH_VERSION=%%A"
+for /f "delims=" %%A in ('call "%VENV_PY%" -c "import torch; print(torch.version.cuda or '')"' ) do set "TORCH_CUDA_VERSION=%%A"
+for /f "delims=" %%A in ('call "%VENV_PY%" -c "import torch; print(torch.cuda.is_available())"' ) do set "TORCH_CUDA_AVAILABLE=%%A"
 
 set "CONFIGURED_DEVICE=auto"
 set "CONFIGURED_OLLAMA_MODEL=scb10x/llama3.1-typhoon2-8b-instruct"
@@ -84,7 +114,7 @@ if "%NVIDIA_GPU%"=="1" (
 
 set "CUDA_WHEEL_TAG="
 if defined NVIDIA_CUDA_VERSION (
-    for /f "delims=" %%A in ('"%VENV_PY%" -c "from smartvoice.preflight import recommend_cuda_wheel_tag; import sys; print(recommend_cuda_wheel_tag(sys.argv[1]) or '')" "%NVIDIA_CUDA_VERSION%"') do set "CUDA_WHEEL_TAG=%%A"
+    for /f "delims=" %%A in ('call "%VENV_PY%" -c "from smartvoice.preflight import recommend_cuda_wheel_tag; import sys; print(recommend_cuda_wheel_tag(sys.argv[1]) or '')" "%NVIDIA_CUDA_VERSION%"') do set "CUDA_WHEEL_TAG=%%A"
 )
 
 echo.
@@ -126,9 +156,9 @@ if "%NVIDIA_GPU%"=="1" (
                 if errorlevel 1 goto error
                 "%VENV_PY%" -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/%CUDA_WHEEL_TAG%
                 if errorlevel 1 goto error
-                for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.__version__)"' ) do set "TORCH_VERSION=%%A"
-                for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.version.cuda or '')"' ) do set "TORCH_CUDA_VERSION=%%A"
-                for /f "delims=" %%A in ('"%VENV_PY%" -c "import torch; print(torch.cuda.is_available())"' ) do set "TORCH_CUDA_AVAILABLE=%%A"
+                for /f "delims=" %%A in ('call "%VENV_PY%" -c "import torch; print(torch.__version__)"' ) do set "TORCH_VERSION=%%A"
+                for /f "delims=" %%A in ('call "%VENV_PY%" -c "import torch; print(torch.version.cuda or '')"' ) do set "TORCH_CUDA_VERSION=%%A"
+                for /f "delims=" %%A in ('call "%VENV_PY%" -c "import torch; print(torch.cuda.is_available())"' ) do set "TORCH_CUDA_AVAILABLE=%%A"
                 echo.
                 echo CUDA install result
                 echo   PyTorch: %TORCH_VERSION%
@@ -222,7 +252,7 @@ goto end
 :error
 echo.
 echo SmartVoice could not start. Check the error above.
-echo If this is the first run, confirm Python 3.10/3.11 and internet access are available.
+echo If this is the first run, confirm internet access is available and retry any installer prompts.
 pause
 exit /b 1
 

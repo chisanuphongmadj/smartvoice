@@ -7,9 +7,11 @@ to `.env`, and open Streamlit automatically.
 ## Minimum requirements
 
 - Windows 10/11, macOS, or Linux
-- Python 3.10 or 3.11
 - Internet access on the first run
 - 10 GB or more free disk space for Python packages and AI models
+
+On Windows, `run.bat` can offer to install Python 3.11 automatically if no supported
+Python is available yet. On macOS/Linux, install Python 3.10 or 3.11 first.
 
 For real AI analysis, also install:
 
@@ -20,12 +22,13 @@ Before sending the project to another company, follow `docs/OMAZZ_RELEASE_CHECKL
 
 ## Windows
 
-1. Install Python 3.10 or 3.11 from https://www.python.org/downloads/
-2. During install, check `Add python.exe to PATH`.
-3. Download or clone this project.
-4. Double-click `run.bat`.
+1. Download or clone this project.
+2. Double-click `run.bat`.
+3. Accept the Python 3.11 installer prompt if the machine does not already have
+   Python 3.10 or 3.11.
 
-First run can take several minutes because it installs dependencies.
+First run can take several minutes because it may install Python, Python packages,
+and AI models.
 After that, double-clicking `run.bat` starts the app.
 
 `run.bat` also prints a local environment check on startup. If it detects an NVIDIA GPU
