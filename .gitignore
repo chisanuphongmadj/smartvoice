@@ -33,6 +33,7 @@ docs/er_diagram.png
 # Build artifacts
 smartvoice.egg-info/
 *.egg-info/
+.worktrees/
 
 # OS
 .DS_Store
