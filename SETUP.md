@@ -218,7 +218,7 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-สถานะล่าสุดที่ยืนยันแล้ว: `135 passed`
+สถานะล่าสุดที่ยืนยันแล้ว: `145 passed` (ทดสอบเมื่อ 2026-05-20)
 
 ---
 

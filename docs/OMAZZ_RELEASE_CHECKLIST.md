@@ -1,21 +1,22 @@
 # Omazz release checklist
 
 Use this before sending SmartVoice to Omazz or running a live demo.
+**Delivery target:** 2026-05-23
 
 ## Must do before sharing
 
 - Remove real customer audio from `data/raw_audio/`.
 - Remove local databases such as `data/smartvoice.db` unless fully anonymized.
-- Remove temporary reports such as `_anomaly_report.txt`.
+- Remove temporary reports such as `_anomaly_report.txt` and any `_*.py` / `_*.txt` scratch files.
 - Confirm `.env` is excluded from the ZIP/commit.
-- Confirm `data/models`, `data/logs`, `.venv`, and `.git` are excluded from the handoff package.
+- Confirm `data/models`, `data/logs`, `.venv`, `.git`, `smartvoice.egg-info`, and `.claude/` are excluded from the handoff package.
 - Run the test suite:
 
 ```powershell
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-Expected current baseline: `135 passed` (warnings about `.pytest_cache` permissions are non-blocking if all tests pass).
+Expected current baseline: `145 passed` as of 2026-05-20 (warnings about `.pytest_cache` permissions are non-blocking if all tests pass; if you hit `PermissionError` on the pytest tmp dir, pass `--basetemp="$env:TEMP\pytest-clean"`).
 
 - Open Home and verify `Deployment readiness`.
 - Create demo users with hashed passwords:

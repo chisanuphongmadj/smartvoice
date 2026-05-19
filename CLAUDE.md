@@ -27,7 +27,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\seed_mock_data.py
 ```
 
-**Current test baseline:** 132 tests, must pass 100% before every commit.
+**Current test baseline:** 145 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
