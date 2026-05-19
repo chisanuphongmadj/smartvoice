@@ -54,6 +54,7 @@ smartvoice/
 │   ├── extract_pdf.py
 │   ├── generate_er_diagram.py
 │   ├── make_password_hash.py
+│   ├── scrub_existing_next_actions.py
 │   └── seed_mock_data.py
 ├── tests/                          # pytest suite
 ├── docs/
@@ -162,4 +163,4 @@ Audio (.wav/.mp3)
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-ผลล่าสุดที่ยืนยันแล้ว: `135 passed`
+ผลล่าสุดที่ยืนยันแล้ว: `145 passed` (ทดสอบเมื่อ 2026-05-20)

@@ -41,7 +41,7 @@ run.bat                 # Windows
 ./run.sh                # Linux/macOS
 ```
 
-**Test baseline ล่าสุด:** 132 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
+**Test baseline ล่าสุด:** 145 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
 
 ---
 
@@ -237,10 +237,12 @@ markers ใช้กับ `_enforce_role_rules` ที่ scoring ตำแห�
 |------|---------|
 | `README.md` | ภาพรวมโปรเจค + tech stack |
 | `SETUP.md` | คู่มือติดตั้งเชิงลึก + troubleshooting |
+| `ONE_CLICK_RUN.md` | คู่มือ launcher สำหรับเครื่อง demo / handoff |
 | `CHANGELOG.md` | ประวัติ release |
 | `docs/architecture.md` | โครงสร้าง + data flow |
 | `docs/database_design.md` | ER diagram + data dictionary |
 | `docs/user_manual.md` | คู่มือผู้ใช้ business |
+| `docs/OMAZZ_RELEASE_CHECKLIST.md` | Checklist ก่อนส่งมอบ / live demo |
 | `.env.example` | template ของ env vars (อ่านได้ — ไม่มี secret) |
 
 ---

@@ -1,7 +1,7 @@
 # รายการแก้ไขรายงาน — ปรับให้ตรงกับระบบปัจจุบัน
 
 > เอกสารนี้รวบรวมจุดที่ต้องแก้ไขในรายงานบทที่ 1, 2 และ 3  
-> โดยอ้างอิงจาก source code จริงในโปรเจกต์ SmartVoice ณ วันที่ 16 พฤษภาคม 2569
+> โดยอ้างอิงจาก source code จริงในโปรเจกต์ SmartVoice ณ วันที่ 20 พฤษภาคม 2569 (ก่อนส่งมอบ 23 พ.ค. 2569)
 > **วิธีใช้**: คัดลอกข้อความ "✅ แก้เป็น" ไปแทนที่ข้อความ "❌ ข้อความเดิม" ในรายงาน
 
 ---
@@ -17,7 +17,7 @@
 - auto case assignment มี recency short-circuit ผ่าน `CASE_RECENCY_HOURS` ก่อนให้ LLM match
 - ระบบ recover งานที่ค้างในสถานะ `processing` ผ่าน `PROCESSING_STALE_MINUTES`
 - หน้า Admin รองรับ search/filter/sort, bulk delete, orphan-case cleanup, และ merge case
-- ชุดทดสอบปัจจุบันยืนยันแล้ว `135 passed`
+- ชุดทดสอบปัจจุบันยืนยันแล้ว `145 passed`
 
 ---
 
