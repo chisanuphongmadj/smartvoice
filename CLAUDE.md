@@ -21,13 +21,13 @@ All commands run from inside `smartvoice/` using the venv Python interpreter on 
 
 # Run the app
 .venv\Scripts\activate
-streamlit run app.py        # → http://localhost:8501
+streamlit run Home.py       # → http://localhost:8501
 
 # Seed mock data
 & ".venv\Scripts\python.exe" scripts\seed_mock_data.py
 ```
 
-**Test baseline:** 91 tests, must pass 100% before every commit.
+**Current test baseline:** 132 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -77,10 +77,12 @@ Pyannote frequently mislabels speakers; LLM also makes mistakes — the system u
 4 separate Ollama calls (split for context window + accuracy):
 1. `extract_summary_and_topics()` — summary, topic, keywords
 2. `analyze_sentiment()` — sentiment + reason
-3. `evaluate_agent_qa()` — politeness, problem_solving, overall_score, next_action_owner
+3. `evaluate_agent_qa()` — politeness, problem_solving, evidence, overall_score, next_action, next_action_owner
 4. `detect_anomaly()` — anomaly flag, reason, severity
 
 Every call → `extract_json()` → falls back to empty dict on parse failure (logs and continues).
+
+Agent QA guardrails: `politeness` and `problem_solving` must be supported by Agent quotes, persisted as `politeness_evidence` / `problem_solving_evidence`; scores are clamped to 1-5 and `overall_score` is recomputed as `politeness + problem_solving` in Python.
 
 ### Auto case assignment (`pipeline.py:_auto_assign_case`)
 
@@ -133,6 +135,7 @@ Normal complaints resolved politely = negative sentiment, **not** anomaly.
 - **`test_config.py`** manipulates env vars with side-effects on other tests — always pass `--ignore=tests\test_config.py`.
 - **`created_at` in DB** = upload/process time, not the actual call date. Call date is in the filename: `YYYYMMDDHHMMSS-...`.
 - **LLM nested bullets** — Typhoon 8B copies sub-bullets as `anomaly_reason` without evidence. Prompts must specify keyword required list and mandate quoting.
+- **Agent QA examples** — avoid concrete fake values in Next Action examples; Typhoon can copy them into every call. Use abstract templates and keep `sanitize_next_action()` in the display path for older DB rows.
 - **Common Whisper errors:** "โอมาสนา"/"โนโลตัส"/"ฟิวทู" for brand names; "ที่โน่น"/"ทีเนี่ย" for "ที่นอน"; Thai phone numbers often mixed Thai/Arabic digits.
 - **PowerShell:** Never use `cd` — set `Cwd` parameter instead.
 - **Imports** must be at the top of every file; never mid-file.

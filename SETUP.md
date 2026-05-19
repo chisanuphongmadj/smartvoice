@@ -117,7 +117,7 @@ python scripts/seed_mock_data.py
 ### 6. เปิดแอป
 
 ```powershell
-streamlit run app.py
+streamlit run Home.py
 ```
 
 หรือใช้:
@@ -134,7 +134,7 @@ streamlit run app.py
 |------|---------|
 | Home | สรุปจำนวนสาย + `Deployment readiness` |
 | Admin | Upload, process, ค้นหา/กรองสาย, bulk delete, เชื่อมลูกค้า, จัดการ/รวมเคส |
-| Dashboard | KPI, charts, anomaly, agent performance, case summary |
+| Dashboard | KPI, charts, anomaly, agent performance พร้อมหลักฐานคะแนน QA, case summary |
 | Customers | ดูลูกค้า, warranty, เคส, และสายที่เชื่อมไว้ |
 | Settings | preset Demo / Real AI, ปรับ model config, ดู readiness checks |
 
@@ -218,7 +218,7 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-สถานะล่าสุดที่ยืนยันแล้ว: `110 passed`
+สถานะล่าสุดที่ยืนยันแล้ว: `135 passed`
 
 ---
 

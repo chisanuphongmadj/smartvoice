@@ -129,7 +129,7 @@ erDiagram
 | `sentiment` | TEXT | `positive` / `neutral` / `negative` |
 | `topic` | TEXT | หัวข้อหลัก |
 | `speaker_mapping` | TEXT JSON | mapping speaker |
-| `agent_performance` | TEXT JSON | คะแนน QA + next action |
+| `agent_performance` | TEXT JSON | คะแนน QA + evidence + next action |
 | `keywords` | TEXT JSON | issue keywords |
 | `brand_mentions` | TEXT JSON | brand mentions |
 | `platform_mentions` | TEXT JSON | platform/channel mentions |
@@ -144,7 +144,7 @@ erDiagram
 | `uploaded_by_role` | TEXT | role ผู้ upload |
 | `status` | TEXT | `uploaded` / `processing` / `done` / `error` |
 | `error_msg` | TEXT | รายละเอียด error |
-| `created_at` | TEXT | เวลาที่ upload |
+| `created_at` | TEXT | เวลาที่ upload (auto case recency จะใช้ timestamp ในชื่อไฟล์ก่อน ถ้ามี) |
 | `updated_at` | TEXT | เวลาที่ update ล่าสุด |
 
 ### `customers`
@@ -230,7 +230,7 @@ erDiagram
 | Field | ตัวอย่าง |
 |---|---|
 | `speaker_mapping` | `{"SPEAKER_00": "Agent", "SPEAKER_01": "Customer"}` |
-| `agent_performance` | `{"politeness": 5, "problem_solving": 4, "overall_score": 9, "next_action": "...", "next_action_owner": "ฝ่ายจัดส่ง"}` |
+| `agent_performance` | `{"politeness": 5, "politeness_evidence": "ทำได้: ... / ไม่ได้: ...", "problem_solving": 4, "problem_solving_evidence": "ทำได้: ... / ไม่ได้: ...", "overall_score": 9, "next_action": "...", "next_action_owner": "ฝ่ายจัดส่ง"}` |
 | `keywords` | `["ที่นอน", "ส่งล่าช้า"]` |
 | `brand_mentions` | `["Restonic"]` |
 | `platform_mentions` | `["Shopee"]` |

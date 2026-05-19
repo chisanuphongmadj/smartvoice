@@ -5,7 +5,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased] — 2026-05-16 — Current project state
+## [Unreleased] — 2026-05-19 — Current project state
 
 ### Added
 - หน้า `Settings` สำหรับสลับ Demo / Real AI และแก้ค่า `.env` ผ่าน UI
@@ -16,13 +16,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Recency short-circuit สำหรับ auto case assignment ผ่าน `CASE_RECENCY_HOURS`
 - Case merge, orphan-case cleanup, admin search/filter/sort, bulk delete, pagination
 - คู่มือ one-click run และ release checklist สำหรับส่งต่อเครื่อง demo
+- Agent QA evidence fields (`politeness_evidence`, `problem_solving_evidence`) สำหรับตรวจสอบเหตุผลของคะแนนบน Dashboard
 
 ### Changed
 - เอกสารทั้งหมดถูกปรับให้ตรงกับสถานะปัจจุบันของโค้ด
 - เอกสาร pipeline เปลี่ยนจากคำอธิบาย “4 parallel calls” เป็น “4 calls” ให้ตรงกับการทำงานจริงแบบ sequential
 - Project structure docs อัปเดตให้รวม `auth.py`, `env_settings.py`, `preflight.py`, `4_Settings.py`, และ scripts ปัจจุบัน
 - Database docs อัปเดตให้รวม audit columns ล่าสุดของ `calls`
-- Test baseline ปัจจุบันเป็น `110 passed`
+- Agent QA prompt เข้มขึ้น: ให้คะแนนเฉพาะข้อที่มีหลักฐานจากคำพูด Agent, ห้ามเดาจากน้ำเสียงหรือมารยาททั่วไป, และบังคับ quote สั้นใน evidence
+- Backend clamp คะแนน `politeness` / `problem_solving` ให้อยู่ช่วง 1-5 และคำนวณ `overall_score = politeness + problem_solving` เอง
+- Dashboard แสดงหลักฐาน Politeness / Problem Solving และคำนวณ Score จากคะแนนย่อยที่ sanitize แล้ว
+- Test baseline ปัจจุบันเป็น `135 passed`
 
 ---
 

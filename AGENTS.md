@@ -34,14 +34,14 @@
 
 # เปิดแอป
 .venv\Scripts\activate
-streamlit run app.py    # → http://localhost:8501
+streamlit run Home.py   # → http://localhost:8501
 
 # หรือใช้ launcher
 run.bat                 # Windows
 ./run.sh                # Linux/macOS
 ```
 
-**Test baseline:** 91 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
+**Test baseline ล่าสุด:** 132 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
 
 ---
 
@@ -49,7 +49,7 @@ run.bat                 # Windows
 
 ```
 smartvoice/
-├── app.py                      # Streamlit home page
+├── Home.py                     # Streamlit home page
 ├── pages/                      # Streamlit multi-page (Admin / Dashboard / Customers / Settings)
 ├── smartvoice/                 # Business logic package
 │   ├── config.py               # ⚠️ environment vars ทั้งหมดอยู่ที่นี่
@@ -140,10 +140,12 @@ smartvoice/
 4 separate LLM calls (ไม่รวมในก้อนเดียวเพราะ context window + ความแม่นยำ):
 1. `extract_summary_and_topics()` — summary + topic + keywords
 2. `analyze_sentiment()` — sentiment + reason
-3. `evaluate_agent_qa()` — politeness + problem_solving + overall_score + next_action_owner
+3. `evaluate_agent_qa()` — politeness + problem_solving + evidence + overall_score + next_action + next_action_owner
 4. `detect_anomaly()` — anomaly flag + reason + severity
 
 ทุก call → `extract_json()` → fallback เป็น empty dict ถ้า parse fail (log + continue)
+
+**Agent QA guardrails ล่าสุด:** `politeness` และ `problem_solving` ต้องอิงหลักฐานจากคำพูด Agent ใน transcript, เก็บ `politeness_evidence` / `problem_solving_evidence`, clamp คะแนนย่อยให้อยู่ช่วง 1-5, และคำนวณ `overall_score = politeness + problem_solving` ใน backend เสมอ
 
 ### 5.3 Auto case assignment (`pipeline.py:_auto_assign_case`)
 
@@ -207,6 +209,7 @@ markers ใช้กับ `_enforce_role_rules` ที่ scoring ตำแห�
 
 ### 7.4 LLM prompt — เลี่ยง nested bullet
 ปัญหาที่เจอจริง: LLM (Typhoon 8B) เคย copy sub-bullet เป็น `anomaly_reason` แม้ไม่มีหลักฐาน → ต้องระบุ keyword required list ชัดและสั่ง quote evidence
+สำหรับ Agent QA ห้ามใส่ตัวอย่าง Next Action ที่มีข้อมูลจริงปลอม เช่น ยอดเงิน/เบอร์โทร/รหัสสินค้า เพราะ LLM เคย copy ตัวอย่างไปแสดงทุกสาย; ใช้ template นามธรรมและ sanitize output ใน `ollama_client.sanitize_next_action()`
 
 ### 7.5 Pipeline เรียง step ผิด
 `_aggressive_relabel_from_strong_cues` ต้องเรียก **ก่อน** `_merge_adjacent_same_speaker` ไม่งั้นการรวมจะ lock label ผิดถาวร

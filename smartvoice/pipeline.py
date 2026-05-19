@@ -1234,6 +1234,25 @@ def _parse_iso(ts: str | None) -> datetime | None:
     return dt
 
 
+def _call_datetime_from_filename(filename: str | None) -> datetime | None:
+    if not filename:
+        return None
+    match = re.search(r"(?<!\d)(20\d{12})(?!\d)", filename)
+    if not match:
+        return None
+    try:
+        dt = datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=timezone(timedelta(hours=7))).astimezone(timezone.utc)
+
+
+def _effective_call_datetime(call: dict | None) -> datetime | None:
+    if not call:
+        return None
+    return _call_datetime_from_filename(call.get("filename")) or _parse_iso(call.get("created_at"))
+
+
 def _auto_assign_case(call_id: int, analysis: dict) -> None:
     """After analysis, attach this call to an existing case or create a new one.
 
@@ -1268,13 +1287,17 @@ def _auto_assign_case(call_id: int, analysis: dict) -> None:
         # Enrich cases with: (a) call summaries for LLM context
         # (b) latest_call_at for recency short-circuit + LLM context
         call = db.get_call_by_id(call_id)
-        call_dt = _parse_iso(call.get("created_at") if call else None)
+        call_dt = _effective_call_datetime(call)
 
         for cs in open_cases:
             case_calls = db.get_calls_by_case(cs["id"])
             summaries = [c.get("summary", "")[:120] for c in case_calls if c.get("summary")]
             cs["call_summaries"] = " | ".join(summaries) if summaries else "-"
-            cs["latest_call_at"] = db.latest_call_time_in_case(cs["id"])
+            case_datetimes = [
+                dt for dt in (_effective_call_datetime(c) for c in case_calls)
+                if dt is not None
+            ]
+            cs["latest_call_at"] = max(case_datetimes).isoformat() if case_datetimes else None
 
         # (1) Recency short-circuit — attach to the most-recently-updated
         # open case if the time gap is within the configured window.

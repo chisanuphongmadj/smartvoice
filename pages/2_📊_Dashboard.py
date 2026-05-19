@@ -8,6 +8,7 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Dashboard", page_icon="📊", layout="wide")
 
 from smartvoice import db
+from smartvoice.ollama_client import sanitize_next_action
 from smartvoice.ui_helpers import init_page, metric_card, sentiment_emoji
 
 init_page()
@@ -283,6 +284,17 @@ st.caption(
     "— เคสที่ปิดแล้วจะไม่แสดง Next Action"
 )
 
+def _short_evidence(value: str) -> str:
+    text = " ".join(str(value or "").split())
+    return text or "—"
+
+def _score_value(value) -> float:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        score = 0.0
+    return max(0.0, min(5.0, score))
+
 # Collect per-call scored entries first, then group by case_id.
 scored_calls = []
 for call in done_calls:
@@ -292,17 +304,26 @@ for call in done_calls:
     except (json.JSONDecodeError, TypeError):
         ap = {}
     if ap.get("overall_score"):
+        next_action, next_action_owner = sanitize_next_action(
+            ap.get("next_action") or "—",
+            ap.get("next_action_owner") or "ไม่มี",
+            call.get("transcript") or "",
+        )
+        politeness = _score_value(ap.get("politeness", 0))
+        problem_solving = _score_value(ap.get("problem_solving", 0))
         scored_calls.append({
             "call_id": call["id"],
             "case_id": call.get("case_id"),
             "filename": call["filename"],
             "phone": call.get("customer_phone") or "",
             "created_at": call.get("created_at") or "",
-            "politeness": float(ap.get("politeness", 0)),
-            "problem_solving": float(ap.get("problem_solving", 0)),
-            "overall_score": float(ap.get("overall_score", 0)),
-            "next_action": ap.get("next_action") or "—",
-            "next_action_owner": ap.get("next_action_owner") or "ไม่มี",
+            "politeness": politeness,
+            "problem_solving": problem_solving,
+            "overall_score": politeness + problem_solving,
+            "politeness_evidence": _short_evidence(ap.get("politeness_evidence", "")),
+            "problem_solving_evidence": _short_evidence(ap.get("problem_solving_evidence", "")),
+            "next_action": next_action,
+            "next_action_owner": next_action_owner,
         })
 
 # Group calls that share a case_id; standalone calls (no case_id) stay solo.
@@ -344,10 +365,13 @@ for case_id, entries in case_groups.items():
         label = f"{_phone_prefix(phone)}{latest['filename']}"
     else:
         label = f"{_phone_prefix(phone)}📂 เคส #{case_id} — {case['subject']} ({n} สาย)"
+    evidence_prefix = f"เฉลี่ยจาก {n} สาย; ล่าสุด: " if n > 1 else ""
     agent_rows.append({
         "Label": label,
         "Politeness": f"{sum(e['politeness'] for e in entries) / n:.1f} / 5.0",
+        "Politeness Evidence": f"{evidence_prefix}{latest['politeness_evidence']}",
         "Problem Solving": f"{sum(e['problem_solving'] for e in entries) / n:.1f} / 5.0",
+        "Problem Solving Evidence": f"{evidence_prefix}{latest['problem_solving_evidence']}",
         "Next Action": CLOSED_ACTION if is_closed else latest["next_action"],
         "Owner": CLOSED_OWNER if is_closed else latest["next_action_owner"],
         "Score": round(sum(e["overall_score"] for e in entries) / n, 1),
@@ -358,7 +382,9 @@ for entry in solo_calls:
     agent_rows.append({
         "Label": f"{_phone_prefix(entry['phone'])}{entry['filename']}",
         "Politeness": f"{entry['politeness']:.1f} / 5.0",
+        "Politeness Evidence": entry["politeness_evidence"],
         "Problem Solving": f"{entry['problem_solving']:.1f} / 5.0",
+        "Problem Solving Evidence": entry["problem_solving_evidence"],
         "Next Action": entry["next_action"],
         "Owner": entry["next_action_owner"],
         "Score": entry["overall_score"],
@@ -398,6 +424,8 @@ if agent_rows:
         column_config={
             "Label": st.column_config.TextColumn("สาย / เคส", width="large"),
             "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%.1f / 10"),
+            "Politeness Evidence": st.column_config.TextColumn("หลักฐาน Politeness", width="large"),
+            "Problem Solving Evidence": st.column_config.TextColumn("หลักฐาน Problem Solving", width="large"),
             "Next Action": st.column_config.TextColumn("Next Action 📌", width="large"),
             "Owner": st.column_config.TextColumn("ผู้รับผิดชอบ 👤", width="medium"),
         },

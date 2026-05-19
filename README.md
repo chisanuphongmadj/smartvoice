@@ -18,7 +18,7 @@ AI-powered Call Center Analytics สำหรับสายภาษาไท�
 - Upload `.wav` / `.mp3`, ตรวจ magic bytes, จำกัดขนาดไฟล์ 100 MB, และ deduplicate ด้วย SHA-256
 - ดึงเบอร์โทรจากชื่อไฟล์, เชื่อมลูกค้า/รับประกันอัตโนมัติ, และบันทึกผู้ upload เพื่อ audit
 - ถอดเสียง + diarization + speaker correction แบบหลายชั้น โดยผสม LLM กับ heuristic rules ภาษาไทย
-- วิเคราะห์ 4 ด้านแยกกัน: summary/topic, sentiment, agent QA, anomaly
+- วิเคราะห์ 4 ด้านแยกกัน: summary/topic, sentiment, agent QA พร้อมหลักฐานคะแนน, anomaly
 - จัดกลุ่มเคสอัตโนมัติด้วย recency short-circuit ก่อนใช้ LLM match
 - มี Dashboard, customer/warranty view, case management, case merge, Settings, login, และ deployment readiness checks
 
@@ -26,7 +26,7 @@ AI-powered Call Center Analytics สำหรับสายภาษาไท�
 
 ```text
 smartvoice/
-├── app.py                         # หน้า Home + deployment readiness
+├── Home.py                        # หน้า Home + deployment readiness
 ├── pages/
 │   ├── 1_📤_Admin.py              # Upload, process, case management
 │   ├── 2_📊_Dashboard.py          # Analytics dashboard
@@ -102,7 +102,7 @@ python -m venv .venv
 pip install -r requirements.txt
 pip install -e . --no-deps
 copy .env.example .env
-streamlit run app.py
+streamlit run Home.py
 ```
 
 ดูรายละเอียดเต็มใน [`SETUP.md`](SETUP.md) และคู่มือส่งต่อเครื่องใน [`ONE_CLICK_RUN.md`](ONE_CLICK_RUN.md)
@@ -146,7 +146,7 @@ Audio (.wav/.mp3)
 | `topic` | หัวข้อหลักที่ลูกค้าติดต่อ |
 | `sentiment` | `positive` / `neutral` / `negative` |
 | `sentiment_reason` | เหตุผลประกอบ sentiment |
-| `agent_performance` | `politeness`, `problem_solving`, `overall_score`, `next_action`, `next_action_owner` |
+| `agent_performance` | `politeness`, `politeness_evidence`, `problem_solving`, `problem_solving_evidence`, `overall_score`, `next_action`, `next_action_owner` |
 | `keywords` | คำสำคัญ |
 | `brand_mentions` | แบรนด์ที่ถูกพูดถึง |
 | `platform_mentions` | แพลตฟอร์มหรือช่องทางที่ถูกพูดถึง |
@@ -162,4 +162,4 @@ Audio (.wav/.mp3)
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-ผลล่าสุดที่ยืนยันแล้ว: `110 passed`
+ผลล่าสุดที่ยืนยันแล้ว: `135 passed`

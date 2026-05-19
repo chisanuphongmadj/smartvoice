@@ -1,7 +1,7 @@
 # SmartVoice — คู่มือการใช้งาน
 
 > **สำหรับ:** ผู้ดูแล Call Center, QA, Supervisor
-> **อัปเดตล่าสุด:** 16 พฤษภาคม 2569
+> **อัปเดตล่าสุด:** 19 พฤษภาคม 2569
 
 ---
 
@@ -31,7 +31,7 @@
 |------|-----------|
 | Home | ดู KPI และ `Deployment readiness` |
 | Admin | Upload + process + จัดการสาย/เคส |
-| Dashboard | ดูกราฟ, anomaly, agent performance, case summary |
+| Dashboard | ดูกราฟ, anomaly, agent performance พร้อมหลักฐานคะแนน QA, case summary |
 | Customers | ดูลูกค้า, warranty, เคส, สายที่เชื่อมไว้ |
 | Settings | ปรับ Demo / Real AI และ config หลัก |
 
@@ -119,13 +119,15 @@ Dashboard แสดง:
 - Anomaly calls พร้อม severity
 - Top 3 issues
 - Agent performance
+- หลักฐานคะแนน Politeness / Problem Solving สำหรับตรวจสอบเหตุผลของคะแนน
 - Case management summary
 - ตารางสรุปทุกสาย
 
 Agent performance จะรวมหลายสายที่อยู่ในเคสเดียวกันเป็น 1 แถว:
 
 - คะแนน = ค่าเฉลี่ยในเคส
-- Next Action = จากสายล่าสุด
+- Score = Politeness + Problem Solving
+- Next Action = จากสายล่าสุด และระบบจะกรองข้อความที่ดูเหมือน copy ตัวอย่างจาก prompt ออก
 - ถ้าเคส `closed` จะไม่แสดง next action ค้าง
 
 ---

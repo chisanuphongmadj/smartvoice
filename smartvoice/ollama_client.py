@@ -45,10 +45,17 @@ def chat(system_prompt: str, user_prompt: str, *, temperature: float = 0) -> str
 
 def extract_json(raw: str) -> dict:
     raw = _normalize_llm_output(raw)
-    match = re.search(r"\{.*\}", raw, re.DOTALL)
-    if not match:
-        raise ValueError(f"No JSON object found in LLM response: {raw[:300]}")
-    return json.loads(match.group())
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(raw):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(raw[idx:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+    raise ValueError(f"No JSON object found in LLM response: {raw[:300]}")
 
 
 def _extract_json_array(raw: str) -> list | None:
@@ -176,12 +183,91 @@ def cleanup_transcript(conversation: list[dict]) -> list[dict]:
 
 MAX_SEGMENTS = 60
 MAX_CHARS = 6000
+HEAD_SEGMENTS = 30
+TAIL_SEGMENTS = MAX_SEGMENTS - HEAD_SEGMENTS
+
+
+def _normalize_bool(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1")
+    return False
+
+
+def _coerce_score(value, default: int = 3, minimum: int = 1, maximum: int = 5) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        score = int(float(value))
+    except (TypeError, ValueError):
+        score = default
+    return max(minimum, min(maximum, score))
+
+
+_PROMPT_EXAMPLE_NEXT_ACTION_TOKENS = (
+    "15,000",
+    "REG0012",
+    "081-987-9336",
+    "Restonic Queen",
+    "Slumberland King",
+    "Dunlopillo Queen",
+)
+
+
+def _looks_like_copied_next_action_example(next_action: str, conversation_text: str) -> bool:
+    return any(
+        token in next_action and token not in conversation_text
+        for token in _PROMPT_EXAMPLE_NEXT_ACTION_TOKENS
+    )
+
+
+def _fallback_next_action_from_conversation(conversation_text: str) -> tuple[str, str]:
+    text = conversation_text.lower()
+    if any(k in text for k in ("คืนเงิน", "โอนเงิน", "รีฟันด์", "refund")):
+        return (
+            "ติดตามการคืนเงินลูกค้า | รายละเอียดตามบทสนทนา | ไม่ระบุในสาย (แนะนำ: ภายใน 7 วันทำการ) | โทรแจ้งลูกค้าและบันทึกผลใน CRM",
+            "ฝ่ายบัญชี",
+        )
+    if any(k in text for k in ("qc", "ตรวจสอบคุณภาพ", "ตรวจสินค้า", "ตรวจที่นอน", "เชื้อรา", "ชำรุด", "เสียหาย", "น้ำท่วม")):
+        return (
+            "ส่งตรวจสอบปัญหาสินค้า | รายละเอียดตามบทสนทนา | ไม่ระบุในสาย (แนะนำ: ภายใน 3-5 วัน) | บันทึกผลตรวจและแจ้งลูกค้า",
+            "ฝ่าย QC",
+        )
+    if any(k in text for k in ("จัดส่ง", "ส่งสินค้า", "รับสินค้า", "รับคืน", "เปลี่ยนสินค้า", "เลื่อนวัน", "วันรับ")):
+        return (
+            "ติดตามและยืนยันการจัดส่งหรือวันรับสินค้า | รายละเอียดตามบทสนทนา | ไม่ระบุในสาย (แนะนำ: ภายใน 2-3 วัน) | โทรแจ้งลูกค้าและบันทึกผลใน CRM",
+            "ฝ่ายจัดส่ง",
+        )
+    if any(k in text for k in ("ประกัน", "warranty", "เคลม")):
+        return (
+            "ติดตามข้อมูลประกันหรือเคลมให้ลูกค้า | รายละเอียดตามบทสนทนา | ไม่ระบุในสาย (แนะนำ: ภายใน 2-3 วัน) | โทรแจ้งลูกค้าและบันทึกผลใน CRM",
+            "Agent คนเดิม",
+        )
+    return (
+        "ติดตามผลตามประเด็นที่ลูกค้าสอบถาม | รายละเอียดตามบทสนทนา | ไม่ระบุในสาย (แนะนำ: ภายใน 2-3 วัน) | โทรแจ้งลูกค้าและบันทึกผลใน CRM",
+        "Agent คนเดิม",
+    )
+
+
+def sanitize_next_action(
+    next_action: str, next_action_owner: str, conversation_text: str
+) -> tuple[str, str]:
+    if _looks_like_copied_next_action_example(next_action or "", conversation_text or ""):
+        return _fallback_next_action_from_conversation(conversation_text or "")
+    return next_action, next_action_owner
 
 
 def _prepare_conversation_text(conversation) -> str:
     """Convert conversation list/str to capped text for LLM prompts."""
     if isinstance(conversation, list):
-        segs = [item for item in conversation if item.get("text")][:MAX_SEGMENTS]
+        all_segs = [item for item in conversation if item.get("text")]
+        if len(all_segs) > MAX_SEGMENTS:
+            segs = all_segs[:HEAD_SEGMENTS] + all_segs[-TAIL_SEGMENTS:]
+        else:
+            segs = all_segs[:MAX_SEGMENTS]
         text = "\n".join(
             f"{item.get('speaker', 'Unknown')}: {item.get('text', '')}"
             for item in segs
@@ -281,19 +367,17 @@ def evaluate_agent_qa(conversation) -> dict:
         log.exception("evaluate_agent_qa: LLM call/parse failed — defaulting to mid scores")
         result = {}
 
-    politeness = result.get("politeness", 3)
-    problem_solving = result.get("problem_solving", 3)
-    overall_score = result.get("overall_score", 0)
-    if not isinstance(politeness, (int, float)):
-        politeness = 3
-    if not isinstance(problem_solving, (int, float)):
-        problem_solving = 3
-    if not isinstance(overall_score, (int, float)):
-        overall_score = int(politeness) + int(problem_solving)
+    politeness = _coerce_score(result.get("politeness"), default=3)
+    problem_solving = _coerce_score(result.get("problem_solving"), default=3)
+    overall_score = politeness + problem_solving
 
-    next_action = result.get("next_action") or "ไม่มี — เคสปิดสมบูรณ์"
-    next_action = _scrub_prompt_example_leakage(next_action, text)
     next_action_owner = result.get("next_action_owner") or "ไม่มี"
+    next_action = result.get("next_action") or "ไม่มี — เคสปิดสมบูรณ์"
+    if _looks_like_copied_next_action_example(next_action, text):
+        next_action, next_action_owner = _fallback_next_action_from_conversation(text)
+    else:
+        next_action = _scrub_prompt_example_leakage(next_action, text)
+        next_action, next_action_owner = sanitize_next_action(next_action, next_action_owner, text)
 
     # Fallback: if next_action exists (not closed) but owner is "ไม่มี",
     # infer owner from keywords in next_action text
@@ -314,9 +398,11 @@ def evaluate_agent_qa(conversation) -> dict:
             next_action_owner = "Agent คนเดิม"
 
     agent_perf = {
-        "politeness": int(politeness),
-        "problem_solving": int(problem_solving),
-        "overall_score": int(overall_score),
+        "politeness": politeness,
+        "politeness_evidence": result.get("politeness_evidence", ""),
+        "problem_solving": problem_solving,
+        "problem_solving_evidence": result.get("problem_solving_evidence", ""),
+        "overall_score": overall_score,
         "next_action": next_action,
         "next_action_owner": next_action_owner,
         "strengths": result.get("strengths", []),
@@ -339,10 +425,14 @@ def detect_anomaly(conversation) -> dict:
         log.exception("detect_anomaly: LLM call/parse failed — defaulting to no anomaly")
         result = {}
 
+    severity = result.get("anomaly_severity") or ""
+    if severity not in ("low", "medium", "high"):
+        severity = ""
+
     return {
-        "anomaly_detected": bool(result.get("anomaly_detected", False)),
+        "anomaly_detected": _normalize_bool(result.get("anomaly_detected", False)),
         "anomaly_reason": result.get("anomaly_reason") or "",
-        "anomaly_severity": result.get("anomaly_severity") or "",
+        "anomaly_severity": severity,
     }
 
 

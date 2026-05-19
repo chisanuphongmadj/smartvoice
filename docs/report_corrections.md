@@ -17,7 +17,7 @@
 - auto case assignment มี recency short-circuit ผ่าน `CASE_RECENCY_HOURS` ก่อนให้ LLM match
 - ระบบ recover งานที่ค้างในสถานะ `processing` ผ่าน `PROCESSING_STALE_MINUTES`
 - หน้า Admin รองรับ search/filter/sort, bulk delete, orphan-case cleanup, และ merge case
-- ชุดทดสอบปัจจุบันยืนยันแล้ว `110 passed`
+- ชุดทดสอบปัจจุบันยืนยันแล้ว `135 passed`
 
 ---
 
@@ -49,7 +49,7 @@
 > สามารถดูผลการวิเคราะห์ เช่น สรุปบทสนทนา (Summary), อารมณ์ของลูกค้า (Sentiment), และหัวข้อการติดต่อ (Intent)
 
 ✅ **แก้เป็น:**
-> สามารถดูผลการวิเคราะห์ เช่น สรุปบทสนทนา (Summary), อารมณ์ของลูกค้าพร้อมเหตุผล (Sentiment & Sentiment Reason), หัวข้อการติดต่อ (Topic/Intent), คำสำคัญ (Keywords), แบรนด์ที่พูดถึง (Brand Mentions), แพลตฟอร์ม/ช่องทาง (Platform Mentions), คะแนนประเมินพนักงาน (Politeness, Problem Solving, Overall Score), สิ่งที่ต้องดำเนินการต่อ (Next Action), จุดแข็ง/จุดปรับปรุง (Strengths/Improvements), และผลตรวจจับความผิดปกติ (Anomaly Detection) พร้อมระดับความรุนแรง (Severity)
+> สามารถดูผลการวิเคราะห์ เช่น สรุปบทสนทนา (Summary), อารมณ์ของลูกค้าพร้อมเหตุผล (Sentiment & Sentiment Reason), หัวข้อการติดต่อ (Topic/Intent), คำสำคัญ (Keywords), แบรนด์ที่พูดถึง (Brand Mentions), แพลตฟอร์ม/ช่องทาง (Platform Mentions), คะแนนประเมินพนักงาน (Politeness, Problem Solving, Overall Score) พร้อมหลักฐานคะแนน, สิ่งที่ต้องดำเนินการต่อ (Next Action), จุดแข็ง/จุดปรับปรุง (Strengths/Improvements), และผลตรวจจับความผิดปกติ (Anomaly Detection) พร้อมระดับความรุนแรง (Severity)
 
 ---
 
@@ -100,7 +100,7 @@
 >
 > **Call 2: Sentiment Analysis** — วิเคราะห์อารมณ์ลูกค้าด้วยเทคนิค Chain-of-Thought (CoT) โดยขั้นตอนที่ 1 สกัดประโยคที่แสดงอารมณ์จากคำพูดของลูกค้า ขั้นตอนที่ 2 ตัดสินจากหลักฐาน โดยกำหนดให้ neutral เป็นค่า default เพื่อป้องกัน Bias จากมารยาทไทย (เช่น "ขอบคุณค่ะ" ตอนปิดสาย ไม่นับเป็น positive) ผลลัพธ์เป็น Positive/Neutral/Negative พร้อมเหตุผล (Sentiment Reason)
 >
-> **Call 3: Agent QA** — ประเมินคุณภาพพนักงานด้วยเกณฑ์ Checklist-based Scoring แบ่งเป็น 2 หมวด หมวดละ 5 ข้อ ได้แก่ (A) Politeness — ทักทาย, สุภาพ, empathy, ขอโทษ, ปิดสาย (คะแนน 1-5) (B) Problem Solving — เข้าใจปัญหา, ตอบตรงประเด็น, ข้อมูลครบ, แนะนำขั้นตอน, proactive advice (คะแนน 1-5) (C) Overall Score = A + B (2-10) นอกจากนี้ยังระบุ Next Action, Strengths และ Improvements โดยใช้ temperature=0.3 เพื่อให้คะแนนมีความหลากหลายระหว่างสายที่ต่างกัน
+> **Call 3: Agent QA** — ประเมินคุณภาพพนักงานด้วยเกณฑ์ Checklist-based Scoring แบ่งเป็น 2 หมวด หมวดละ 5 ข้อ ได้แก่ (A) Politeness — ทักทาย, สุภาพ, empathy, ขอโทษ, ปิดสาย (คะแนน 1-5) (B) Problem Solving — เข้าใจปัญหา, ตอบตรงประเด็น, ข้อมูลครบ, แนะนำขั้นตอน, proactive advice (คะแนน 1-5) (C) Overall Score = A + B (2-10) โดยต้องมีหลักฐานจากคำพูด Agent ใน transcript สำหรับคะแนนย่อย และ backend จะ clamp คะแนนพร้อมคำนวณ overall_score ซ้ำเพื่อความถูกต้อง นอกจากนี้ยังระบุ Next Action, Strengths และ Improvements โดยใช้ temperature=0.3 เพื่อให้คะแนนมีความหลากหลายระหว่างสายที่ต่างกัน
 >
 > **Call 4: Anomaly Detection** — ตรวจจับความผิดปกติ 4 ประเภท ได้แก่ ลูกค้าไม่พอใจรุนแรง, พนักงานพฤติกรรมไม่เหมาะสม, ปัญหาร้ายแรง (สุขภาพ/ความปลอดภัย) และสายมีปัญหาทางเทคนิค ผลลัพธ์ระบุ anomaly_detected (true/false), anomaly_reason และ anomaly_severity (low/medium/high)
 >
@@ -120,7 +120,7 @@
 > - **Issue Keywords** — แสดงคำสำคัญที่พบบ่อยจากทุกสาย
 > - **Brand Mentions** — แสดงแบรนด์ที่ลูกค้าพูดถึง (Omazz, Restonic, Lotus ฯลฯ)
 > - **Platform/Channel Mentions** — แสดงช่องทางที่พูดถึง (Shopee, Lazada, LINE ฯลฯ)
-> - **Agent Performance** — แสดงคะแนน Politeness (1-5), Problem Solving (1-5) และ Overall Score (2-10) ในรูปแบบ Gauge Chart พร้อมตาราง Next Action, Strengths, Improvements
+> - **Agent Performance** — แสดงคะแนน Politeness (1-5), Problem Solving (1-5), Overall Score (2-10), หลักฐานคะแนน QA, Next Action และผู้รับผิดชอบ
 > - **Anomaly Detection** — แสดงสัดส่วนสายปกติ/ผิดปกติ พร้อม Severity Badge (Low/Medium/High)
 > - **Call Summaries** — ตารางแสดงข้อมูลรายสาย ได้แก่ Filename, Sentiment, Topic, Keywords, Anomaly, Summary และวันที่สร้าง
 >
@@ -183,7 +183,7 @@
 > **ระดับที่ 2: Analysis (วิเคราะห์เชิงลึก) — แบ่งเป็น 4 Prompt Calls แยกอิสระ**
 > - **Call 1: Extraction** — สรุปบทสนทนา (Summary), จำแนกหัวข้อ (Topic/Intent) จาก 9 หมวดที่กำหนด, สกัดคำสำคัญ (Keywords), ระบุแบรนด์ (Brand Mentions) และแพลตฟอร์ม (Platform Mentions)
 > - **Call 2: Sentiment Analysis** — วิเคราะห์อารมณ์ลูกค้าด้วยเทคนิค Chain-of-Thought (CoT) พร้อมเหตุผลประกอบ
-> - **Call 3: Agent QA** — ประเมินพนักงานด้วย Checklist-based Scoring (Politeness 1-5, Problem Solving 1-5, Overall 2-10) พร้อม Next Action, Strengths, Improvements
+> - **Call 3: Agent QA** — ประเมินพนักงานด้วย Checklist-based Scoring (Politeness 1-5, Problem Solving 1-5, Overall 2-10) พร้อม evidence, Next Action, Strengths, Improvements
 > - **Call 4: Anomaly Detection** — ตรวจจับความผิดปกติ 4 ประเภท พร้อมระดับ Severity (Low/Medium/High)
 >
 > การแบ่งเป็น 4 Calls แยกอิสระช่วยให้แต่ละงานได้ Prompt ที่เฉพาะเจาะจง ลดปัญหา Prompt ยาวเกินไปที่ทำให้ LLM ขนาด 8B ให้ผลลัพธ์ไม่ดี
@@ -212,7 +212,7 @@
 > Transcript, Sentiment, Intent, Summary, Metadata ของการโทร
 
 ✅ **แก้เป็น:**
-> ข้อมูลที่จัดเก็บในตาราง calls ประกอบด้วย filename, file_hash (SHA-256), file_path, transcript, summary, sentiment, sentiment_reason, topic, speaker_mapping, agent_performance (JSON), keywords (JSON Array), brand_mentions (JSON Array), platform_mentions (JSON Array), anomaly_detected (Boolean), anomaly_reason, anomaly_severity, status (uploaded/processing/done/error), error_msg, processing_step, created_at และ updated_at
+> ข้อมูลที่จัดเก็บในตาราง calls ประกอบด้วย filename, file_hash (SHA-256), file_path, transcript, summary, sentiment, sentiment_reason, topic, speaker_mapping, agent_performance (JSON พร้อมคะแนน QA และ evidence), keywords (JSON Array), brand_mentions (JSON Array), platform_mentions (JSON Array), anomaly_detected (Boolean), anomaly_reason, anomaly_severity, customer_phone, case_id, uploaded_by, uploaded_by_role, status (uploaded/processing/done/error), error_msg, processing_step, created_at และ updated_at
 
 ---
 
@@ -321,7 +321,7 @@
 > ตาราง calls เป็นหัวใจของระบบ จัดเก็บข้อมูลการโทรทั้งหมด ได้แก่ ... ผลวิเคราะห์อารมณ์ (sentiment) หัวข้อการติดต่อ (topic) ผลประเมินพนักงานในรูปแบบ JSON (agent_performance) คำสำคัญ (keywords) แบรนด์ที่พูดถึง (brand_mentions) แพลตฟอร์มที่กล่าวถึง (platform_mentions) และข้อมูลความผิดปกติ (anomaly_detected, anomaly_reason) พร้อมสถานะการประมวลผล (status) ที่มีค่าได้แก่ uploaded, processing, done และ error
 
 ✅ **แก้เป็น:**
-> ตาราง calls เป็นหัวใจของระบบ จัดเก็บข้อมูลการโทรทั้งหมด ได้แก่ ชื่อไฟล์ (filename), ค่า SHA-256 Hash สำหรับป้องกันการบันทึกซ้ำ (file_hash UNIQUE), ที่อยู่ไฟล์เสียง (file_path), บทสนทนาที่ถอดเสียงแล้ว (transcript), สรุปบทสนทนา (summary), ผลวิเคราะห์อารมณ์ (sentiment) พร้อมเหตุผล (sentiment_reason), หัวข้อการติดต่อ (topic), การจับคู่ผู้พูด (speaker_mapping), ผลประเมินพนักงานในรูปแบบ JSON (agent_performance) ซึ่งประกอบด้วย politeness (1-5), problem_solving (1-5), overall_score (2-10), next_action, strengths และ improvements, คำสำคัญในรูปแบบ JSON Array (keywords), แบรนด์ที่พูดถึง (brand_mentions), แพลตฟอร์มที่กล่าวถึง (platform_mentions), ข้อมูลความผิดปกติ (anomaly_detected, anomaly_reason) พร้อมระดับความรุนแรง (anomaly_severity เป็น low/medium/high), ขั้นตอนที่กำลังประมวลผล (processing_step), สถานะ (status ได้แก่ uploaded/processing/done/error), ข้อความ error (error_msg) และ timestamps (created_at, updated_at)
+> ตาราง calls เป็นหัวใจของระบบ จัดเก็บข้อมูลการโทรทั้งหมด ได้แก่ ชื่อไฟล์ (filename), ค่า SHA-256 Hash สำหรับป้องกันการบันทึกซ้ำ (file_hash UNIQUE), ที่อยู่ไฟล์เสียง (file_path), บทสนทนาที่ถอดเสียงแล้ว (transcript), สรุปบทสนทนา (summary), ผลวิเคราะห์อารมณ์ (sentiment) พร้อมเหตุผล (sentiment_reason), หัวข้อการติดต่อ (topic), การจับคู่ผู้พูด (speaker_mapping), ผลประเมินพนักงานในรูปแบบ JSON (agent_performance) ซึ่งประกอบด้วย politeness (1-5), politeness_evidence, problem_solving (1-5), problem_solving_evidence, overall_score (2-10), next_action, strengths และ improvements, คำสำคัญในรูปแบบ JSON Array (keywords), แบรนด์ที่พูดถึง (brand_mentions), แพลตฟอร์มที่กล่าวถึง (platform_mentions), ข้อมูลความผิดปกติ (anomaly_detected, anomaly_reason) พร้อมระดับความรุนแรง (anomaly_severity เป็น low/medium/high), ขั้นตอนที่กำลังประมวลผล (processing_step), สถานะ (status ได้แก่ uploaded/processing/done/error), ข้อความ error (error_msg) และ timestamps (created_at, updated_at)
 >
 > ระบบมีกลไก Auto Migration ที่ตรวจสอบ Column ที่มีอยู่และเพิ่ม Column ใหม่อัตโนมัติ เพื่อรองรับการอัปเกรด Schema โดยไม่สูญเสียข้อมูลเดิม
 

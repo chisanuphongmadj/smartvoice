@@ -97,6 +97,7 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 - `data/models`
 - `data/logs`
 - local DB เช่น `data/smartvoice.db`
+- `smartvoice.egg-info` และ `*.egg-info`
 - temporary reports เช่น `_anomaly_report.txt`
 
 ถ้าต้องการ installer แบบ self-contained จริง ๆ ให้พิจารณา Docker หรือ PyInstaller ภายหลัง โดย Docker มักเสถียรกว่าสำหรับ stack ที่มี Torch, pyannote, CUDA, และ Ollama

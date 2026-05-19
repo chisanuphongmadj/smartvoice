@@ -23,6 +23,10 @@ class TestExtractJson(unittest.TestCase):
         raw = 'Here is the result: {"x": 42} — done.'
         self.assertEqual(ollama_client.extract_json(raw), {"x": 42})
 
+    def test_uses_first_json_object_when_multiple_objects_are_present(self):
+        raw = 'Example: {"ignore": true}\nFinal: {"x": 42}'
+        self.assertEqual(ollama_client.extract_json(raw), {"ignore": True})
+
     def test_raises_when_no_json(self):
         with self.assertRaises(ValueError):
             ollama_client.extract_json("nothing here")
@@ -92,6 +96,50 @@ class TestNextActionOwnerFallback(unittest.TestCase):
         })
         ap = json.loads(out["agent_performance"])
         self.assertEqual(ap["next_action_owner"], "หัวหน้าทีม")
+
+    def test_evidence_fields_are_preserved_for_audit(self):
+        out = self._run_with_response({
+            "politeness": 4,
+            "politeness_evidence": "ทำได้: ใช้คำสุภาพ / ไม่ได้: ไม่กล่าวปิดสาย",
+            "problem_solving": 3,
+            "problem_solving_evidence": "ทำได้: รับเรื่อง / ไม่ได้: ไม่ระบุเวลา",
+            "overall_score": 7,
+            "next_action": "โทรแจ้งผลลูกค้าอีกครั้ง",
+            "next_action_owner": "Agent คนเดิม",
+        })
+        ap = json.loads(out["agent_performance"])
+        self.assertIn("politeness_evidence", ap)
+        self.assertIn("problem_solving_evidence", ap)
+
+    def test_scores_are_clamped_and_overall_is_recomputed(self):
+        out = self._run_with_response({
+            "politeness": 8,
+            "problem_solving": "0",
+            "overall_score": 10,
+            "next_action": "โทรแจ้งผลลูกค้าอีกครั้ง",
+            "next_action_owner": "Agent คนเดิม",
+        })
+        ap = json.loads(out["agent_performance"])
+        self.assertEqual(ap["politeness"], 5)
+        self.assertEqual(ap["problem_solving"], 1)
+        self.assertEqual(ap["overall_score"], 6)
+
+    def test_copied_prompt_example_next_action_is_replaced(self):
+        out = self._run_with_response({
+            "politeness": 5,
+            "problem_solving": 4,
+            "overall_score": 9,
+            "next_action": (
+                "ติดตามการโอนเงินคืนลูกค้า | จำนวน 15,000 บาท "
+                "(ที่นอน Restonic Queen Size รหัส #REG0012) | ภายใน 7 วันทำการ | "
+                "โทรแจ้งลูกค้าที่ 081-987-9336 หลังโอนเงินเรียบร้อย + บันทึกใน CRM"
+            ),
+            "next_action_owner": "ฝ่ายบัญชี",
+        })
+        ap = json.loads(out["agent_performance"])
+        self.assertNotIn("15,000", ap["next_action"])
+        self.assertNotIn("REG0012", ap["next_action"])
+        self.assertNotEqual(ap["next_action_owner"], "ฝ่ายบัญชี")
 
 
 class TestPromptExampleScrubbing(unittest.TestCase):
@@ -196,6 +244,34 @@ class TestAnalyzeSentimentNormalization(unittest.TestCase):
 
     def test_case_insensitive(self):
         self.assertEqual(self._run_with({"sentiment": "POSITIVE"})["sentiment"], "positive")
+
+
+class TestDetectAnomalyNormalization(unittest.TestCase):
+    def _run_with(self, payload):
+        with patch.object(ollama_client, "chat", return_value=json.dumps(payload)):
+            return ollama_client.detect_anomaly([{"speaker": "Customer", "text": "ขอบคุณค่ะ"}])
+
+    def test_string_false_is_not_truthy(self):
+        out = self._run_with({"anomaly_detected": "false", "anomaly_reason": None})
+        self.assertIs(out["anomaly_detected"], False)
+
+    def test_invalid_severity_is_cleared(self):
+        out = self._run_with({"anomaly_detected": True, "anomaly_severity": "urgent"})
+        self.assertEqual(out["anomaly_severity"], "")
+
+
+class TestPrepareConversationText(unittest.TestCase):
+    def test_long_conversation_keeps_tail_context(self):
+        conversation = [
+            {"speaker": "Customer", "text": f"turn-{i}"}
+            for i in range(70)
+        ]
+
+        text = ollama_client._prepare_conversation_text(conversation)
+
+        self.assertIn("turn-0", text)
+        self.assertIn("turn-69", text)
+        self.assertNotIn("turn-35", text)
 
 
 if __name__ == "__main__":

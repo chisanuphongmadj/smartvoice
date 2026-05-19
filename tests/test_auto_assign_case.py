@@ -63,6 +63,36 @@ class TestRecencyShortCircuit(PipelineDBTestCase):
         case = db.get_case_by_id(case_id)
         self.assertEqual(case["status"], "follow_up")
 
+    def test_filename_call_datetime_prevents_false_recent_merge(self):
+        cid = db.insert_customer(first_name="x", last_name="y", phone="0819879336")
+        call1 = db.insert_call(
+            "20260101090000-0819879336-104-Inbound.wav",
+            "ha",
+            "/a.wav",
+        )
+        db.link_call_customer(call_id=call1, customer_id=cid, matched_by="auto_phone")
+        pipeline._auto_assign_case(call1, {"topic": "สอบถามการจัดส่ง", "summary": "s1"})
+        old_case = db.get_call_by_id(call1)["case_id"]
+
+        call2 = db.insert_call(
+            "20260110100000-0819879336-104-Inbound.wav",
+            "hb",
+            "/b.wav",
+        )
+        db.link_call_customer(call_id=call2, customer_id=cid, matched_by="auto_phone")
+
+        with patch("smartvoice.pipeline.ollama_client") as mock_llm:
+            mock_llm.match_case.return_value = {
+                "match_case_id": None,
+                "suggested_subject": "เรื่องใหม่",
+            }
+            pipeline._auto_assign_case(call2, {"topic": "สอบถามโปรโมชั่น", "summary": "s2"})
+            mock_llm.match_case.assert_called_once()
+
+        call2_row = db.get_call_by_id(call2)
+        self.assertIsNotNone(call2_row["case_id"])
+        self.assertNotEqual(call2_row["case_id"], old_case)
+
     def test_stale_case_falls_through_to_llm(self):
         """If last call is older than CASE_RECENCY_HOURS, LLM is consulted."""
         cid, call1 = self._setup_customer_with_call()

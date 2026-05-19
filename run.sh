@@ -62,4 +62,4 @@ elif command -v xdg-open >/dev/null 2>&1; then
     xdg-open "http://localhost:${PORT:-8501}" >/dev/null 2>&1 || true
 fi
 
-exec "$VENV_PY" -m streamlit run app.py --server.port "${PORT:-8501}"
+exec "$VENV_PY" -m streamlit run Home.py --server.port "${PORT:-8501}"

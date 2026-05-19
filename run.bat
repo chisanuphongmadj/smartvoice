@@ -246,7 +246,7 @@ echo Opening SmartVoice at http://localhost:8501
 echo Keep this window open while using the app.
 echo.
 start "" "http://localhost:8501"
-"%VENV_PY%" -m streamlit run app.py --server.port 8501 --server.headless true
+"%VENV_PY%" -m streamlit run Home.py --server.port 8501 --server.headless true
 goto end
 
 :error

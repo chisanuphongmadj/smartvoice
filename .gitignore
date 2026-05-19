@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.pyo
 
@@ -34,6 +35,7 @@ docs/er_diagram.png
 smartvoice.egg-info/
 *.egg-info/
 .worktrees/
+.claude/
 
 # OS
 .DS_Store

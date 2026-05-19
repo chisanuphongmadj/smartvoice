@@ -1,9 +1,9 @@
-"""SmartVoice — AI-powered Call Center Analytics (home page)."""
+"""Thai Call Analytics — AI-powered Call Center Analytics (home page)."""
 
 import streamlit as st
 
 st.set_page_config(
-    page_title="SmartVoice",
+    page_title="Thai Call Analytics",
     page_icon="🎙️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -16,8 +16,8 @@ from smartvoice.ui_helpers import init_page, metric_card
 init_page()
 
 # ── Home page ────────────────────────────────────────────────────────────
-st.title("🎙️ SmartVoice")
-st.markdown("**AI-powered Call Center Analytics** — transcribes Thai audio, diarizes speakers, and runs LLM quality analysis.")
+st.title("🎙️ Thai Call Analytics")
+st.markdown("**AI-powered Call Center Analytics for Thai Customer Calls** — transcribes Thai audio, diarizes speakers, and runs LLM quality analysis.")
 
 st.divider()
 

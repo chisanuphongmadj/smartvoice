@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def main():
-    app_path = Path(__file__).resolve().parent.parent / "app.py"
+    app_path = Path(__file__).resolve().parent.parent / "Home.py"
     sys.exit(subprocess.call(["streamlit", "run", str(app_path), "--server.port", "8501"]))
 
 

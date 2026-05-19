@@ -39,7 +39,7 @@
 |------|---------|
 | Home | KPI เร็ว + `Deployment readiness` |
 | Admin | Upload, process, ค้นหา/กรอง, bulk delete, link ลูกค้า, จัดการ/รวมเคส |
-| Dashboard | Charts, anomaly, agent performance, case summary, call summaries |
+| Dashboard | Charts, anomaly, agent performance พร้อม QA evidence, case summary, call summaries |
 | Customers | ลูกค้า, warranty, เคส, สายที่เชื่อมไว้ |
 | Settings | preset Demo / Real AI, แก้ `.env`, readiness checks |
 
@@ -73,11 +73,13 @@ Upload audio
 | 1. STT + diarization | ถอดเสียง, group segment, normalize, split, enforce role เบื้องต้น |
 | 2. Transcript cleanup | ให้ LLM เก็บกวาดข้อความ แล้ว rerun splitter / normalization |
 | 3. Speaker correction | ให้ LLM แก้ speaker turn แล้วตามด้วย deterministic strong cues + รอบ cleanup/splitter ซ้ำ |
-| 4. Analysis | เรียก LLM 4 ครั้ง: extraction, sentiment, agent QA, anomaly |
+| 4. Analysis | เรียก LLM 4 ครั้ง: extraction, sentiment, agent QA พร้อม evidence, anomaly |
 | 5. Save | บันทึก transcript + analysis ลง DB |
 | 6. Case assignment | ใช้ recency short-circuit ก่อน fallback ไป LLM case match |
 
 หมายเหตุ: 4 analysis calls ทำแบบ **sequential** ใน `analyze_transcript()` ไม่ใช่ parallel
+
+Agent QA score ถูก normalize ใน `ollama_client.evaluate_agent_qa()`: `politeness` และ `problem_solving` ถูก clamp ให้อยู่ช่วง 1-5, เก็บ evidence แยก, และ `overall_score` ถูกคำนวณจากคะแนนย่อยใน backend เพื่อลดผลเพี้ยนจาก LLM
 
 ---
 
@@ -152,7 +154,7 @@ filename
 
 ```text
 smartvoice/
-├── app.py
+├── Home.py
 ├── pages/
 │   ├── 1_📤_Admin.py
 │   ├── 2_📊_Dashboard.py

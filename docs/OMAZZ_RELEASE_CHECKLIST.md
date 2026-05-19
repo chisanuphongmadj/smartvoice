@@ -15,6 +15,8 @@ Use this before sending SmartVoice to Omazz or running a live demo.
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
+Expected current baseline: `135 passed` (warnings about `.pytest_cache` permissions are non-blocking if all tests pass).
+
 - Open Home and verify `Deployment readiness`.
 - Create demo users with hashed passwords:
 
@@ -65,9 +67,10 @@ Recommended demo flow:
 4. Process the call and show the tagged transcript.
 5. Show how the system auto-links customer/warranty from the filename phone number.
 6. Show case grouping, next action owner, and case merge if relevant.
-7. Open Dashboard for sentiment, issue keywords, anomaly, agent performance, and case summary.
-8. Open Customers for warranty history and linked call context.
-9. Open Settings briefly to show Demo / Real AI switching.
+7. Open Dashboard for sentiment, issue keywords, anomaly, agent performance, QA evidence, and case summary.
+8. Confirm Next Action rows use case-specific content and do not repeat fake prompt examples such as fixed amounts, product codes, or phone numbers.
+9. Open Customers for warranty history and linked call context.
+10. Open Settings briefly to show Demo / Real AI switching.
 
 ## Privacy notes
 
