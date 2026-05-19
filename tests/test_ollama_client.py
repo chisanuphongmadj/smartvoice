@@ -190,6 +190,76 @@ class TestPromptExampleScrubbing(unittest.TestCase):
         self.assertNotIn("REG0012", ap["next_action"])
 
 
+class TestSanitizeEvidence(unittest.TestCase):
+    """sanitize_evidence must:
+      - return real evidence unchanged
+      - replace bracket placeholders ([ข้อ + quote สั้น], etc.) with a safe fallback
+      - replace vague summaries ("ทำได้: ทุกข้อ") that lack any quote
+      - handle empty / None gracefully
+    """
+
+    def test_real_evidence_with_quotes_is_preserved(self):
+        text = "ทำได้: ทักทาย ('สวัสดีค่ะ ร้านที่นอน'), ขอบคุณ ('ขอบคุณค่ะ') / ไม่ได้: ทวนชื่อ (ไม่พบหลักฐาน)"
+        self.assertEqual(ollama_client.sanitize_evidence(text), text)
+
+    def test_leaked_bracket_placeholder_is_replaced(self):
+        text = "ทำได้: [ทุกข้อ + quote สั้น] / ไม่ได้: [ไม่มี]"
+        out = ollama_client.sanitize_evidence(text)
+        self.assertNotIn("[", out)
+        self.assertNotIn("ทุกข้อ + quote", out)
+        self.assertTrue(out)
+
+    def test_leaked_partial_template_fragment_is_replaced(self):
+        text = "ทำได้: [4 ข้อ + quote สั้น] / ไม่ได้: [1 ข้อ + เหตุผลหรือไม่พบหลักฐาน]"
+        out = ollama_client.sanitize_evidence(text)
+        self.assertNotIn("[", out)
+        self.assertNotIn("เหตุผลหรือไม่พบหลักฐาน", out)
+
+    def test_leaked_angle_bracket_placeholder_is_replaced(self):
+        # New schema uses <...> — must also be caught if LLM copies it
+        text = "ทำได้: <ชื่อข้อจริง> ('<quote Agent>') / ไม่ได้: <ชื่อข้อจริง> (ไม่พบหลักฐาน)"
+        out = ollama_client.sanitize_evidence(text)
+        self.assertNotIn("<", out)
+
+    def test_vague_summary_without_quotes_is_replaced(self):
+        text = "ทำได้: ทุกข้อ / ไม่ได้: ไม่มีข้อที่ไม่ทำ"
+        out = ollama_client.sanitize_evidence(text)
+        self.assertNotEqual(out, text)
+        self.assertNotIn("ทุกข้อ", out)
+
+    def test_vague_summary_with_real_quote_is_kept(self):
+        # If the model says "ทุกข้อ" but ALSO supplies an Agent quote, accept it
+        text = "ทำได้: ทุกข้อ เช่น ทักทาย ('สวัสดีค่ะ พลอยค่ะ') / ไม่ได้: ไม่มี"
+        self.assertEqual(ollama_client.sanitize_evidence(text), text)
+
+    def test_specific_evidence_without_quote_but_with_no_evidence_marker(self):
+        text = "ทำได้: ใช้คำสุภาพ / ไม่ได้: ไม่กล่าวปิดสาย (ไม่พบหลักฐาน)"
+        self.assertEqual(ollama_client.sanitize_evidence(text), text)
+
+    def test_empty_string_returns_empty(self):
+        self.assertEqual(ollama_client.sanitize_evidence(""), "")
+
+    def test_none_returns_empty(self):
+        self.assertEqual(ollama_client.sanitize_evidence(None), "")
+
+    def test_evidence_sanitisation_applied_in_evaluate_agent_qa(self):
+        """End-to-end: leaked evidence from LLM is cleaned in the saved JSON."""
+        payload = {
+            "politeness": 5,
+            "politeness_evidence": "ทำได้: [ทุกข้อ + quote สั้น] / ไม่ได้: [ไม่มี]",
+            "problem_solving": 4,
+            "problem_solving_evidence": "ทำได้: [4 ข้อ + quote สั้น] / ไม่ได้: [1 ข้อ + เหตุผลหรือไม่พบหลักฐาน]",
+            "overall_score": 9,
+            "next_action": "โทรแจ้งผลลูกค้า",
+            "next_action_owner": "Agent คนเดิม",
+        }
+        with patch.object(ollama_client, "chat", return_value=json.dumps(payload, ensure_ascii=False)):
+            out = ollama_client.evaluate_agent_qa([{"speaker": "Agent", "text": "hi"}])
+        ap = json.loads(out["agent_performance"])
+        self.assertNotIn("[", ap["politeness_evidence"])
+        self.assertNotIn("[", ap["problem_solving_evidence"])
+
+
 class TestCorrectSpeakersRobustness(unittest.TestCase):
     """Regression: LLM sometimes returns malformed JSON arrays (e.g. bare ints)
     and correct_speakers must not crash."""

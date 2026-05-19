@@ -260,6 +260,82 @@ def sanitize_next_action(
     return next_action, next_action_owner
 
 
+# Placeholder fragments that Typhoon-8B has been observed copying verbatim from
+# the agent-QA prompt schema into politeness_evidence / problem_solving_evidence.
+# Match against the *stripped* evidence — see _strip_brackets below.
+_EVIDENCE_LEAKAGE_FRAGMENTS = (
+    "ข้อ + quote สั้น",
+    "ข้อ + quote",
+    "ทุกข้อ + quote",
+    "quote สั้นจาก transcript",
+    "เหตุผลหรือไม่พบหลักฐาน",
+    "ชื่อข้อจริง",
+    "<quote",
+    "quote Agent",
+)
+
+# Vague summary phrases the LLM emits when it summarises rather than quoting —
+# if any appears AND no quote is present, treat as "no evidence".
+_EVIDENCE_VAGUE_PHRASES = (
+    "ทุกข้อ",
+    "ไม่มีข้อที่ไม่ทำ",
+    "ไม่มีข้อที่ทำไม่ได้",
+)
+
+_BRACKET_RE = re.compile(r"[\[\]<>]")
+
+
+def _evidence_is_leaked(evidence: str) -> bool:
+    """Detect template/placeholder leakage in evidence strings."""
+    if not evidence:
+        return False
+    text = evidence.strip()
+    if _BRACKET_RE.search(text):
+        return True
+    lowered = text.lower()
+    if any(frag.lower() in lowered for frag in _EVIDENCE_LEAKAGE_FRAGMENTS):
+        return True
+    return False
+
+
+def _evidence_is_vague(evidence: str) -> bool:
+    """Detect evidence that summarises instead of quoting.
+
+    Rule: if the LLM uses a known vague phrase ("ทุกข้อ", "ไม่มีข้อที่ไม่ทำ")
+    and provides no quoted Agent line, it never actually inspected the
+    transcript — fall back to "ไม่พบหลักฐาน".
+    """
+    if not evidence:
+        return True
+    text = evidence.strip()
+    has_quote = ("'" in text) or ('"' in text) or ("ไม่พบหลักฐาน" in text)
+    if has_quote:
+        return False
+    bare = " ".join(text.split())
+    return any(phrase in bare for phrase in _EVIDENCE_VAGUE_PHRASES)
+
+
+_EVIDENCE_FALLBACK = "ไม่พบหลักฐานที่ชัดเจนใน transcript — โปรด re-process หรือฟังสายเพื่อตรวจสอบ"
+
+
+def sanitize_evidence(evidence: str) -> str:
+    """Clean LLM evidence strings before display.
+
+    Why: Typhoon-8B sometimes copies the JSON-schema placeholder
+    (e.g. "[ข้อ + quote สั้น]") straight into politeness_evidence /
+    problem_solving_evidence, leaving users staring at template syntax instead
+    of real findings. Also drops vague summaries like "ทำได้: ทุกข้อ" that
+    carry no quotes or item names.
+    """
+    if not evidence:
+        return ""
+    text = str(evidence).strip()
+    if _evidence_is_leaked(text) or _evidence_is_vague(text):
+        log.warning("sanitize_evidence: detected leaked/vague evidence %r", text[:120])
+        return _EVIDENCE_FALLBACK
+    return text
+
+
 def _prepare_conversation_text(conversation) -> str:
     """Convert conversation list/str to capped text for LLM prompts."""
     if isinstance(conversation, list):
@@ -399,9 +475,9 @@ def evaluate_agent_qa(conversation) -> dict:
 
     agent_perf = {
         "politeness": politeness,
-        "politeness_evidence": result.get("politeness_evidence", ""),
+        "politeness_evidence": sanitize_evidence(result.get("politeness_evidence", "")),
         "problem_solving": problem_solving,
-        "problem_solving_evidence": result.get("problem_solving_evidence", ""),
+        "problem_solving_evidence": sanitize_evidence(result.get("problem_solving_evidence", "")),
         "overall_score": overall_score,
         "next_action": next_action,
         "next_action_owner": next_action_owner,

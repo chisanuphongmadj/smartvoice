@@ -8,7 +8,7 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Dashboard", page_icon="📊", layout="wide")
 
 from smartvoice import db
-from smartvoice.ollama_client import sanitize_next_action
+from smartvoice.ollama_client import sanitize_evidence, sanitize_next_action
 from smartvoice.ui_helpers import init_page, metric_card, sentiment_emoji
 
 init_page()
@@ -286,7 +286,8 @@ st.caption(
 
 def _short_evidence(value: str) -> str:
     text = " ".join(str(value or "").split())
-    return text or "—"
+    cleaned = sanitize_evidence(text)
+    return cleaned or "—"
 
 def _score_value(value) -> float:
     try:
