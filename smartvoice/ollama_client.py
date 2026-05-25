@@ -317,21 +317,42 @@ def _evidence_is_vague(evidence: str) -> bool:
 
 _EVIDENCE_FALLBACK = "ไม่พบหลักฐานที่ชัดเจนใน transcript — โปรด re-process หรือฟังสายเพื่อตรวจสอบ"
 
+# Concrete fake values previously used in the Agent QA prompt's "รูปแบบที่ถูก"
+# example. Typhoon-8B copied them verbatim into evidence on most calls, so any
+# row that still references them — without the same string actually appearing
+# in the real transcript — is template leakage and must be scrubbed.
+_EVIDENCE_PROMPT_EXAMPLE_TOKENS = ("ร้านที่นอนพลอย", "พลอยค่ะ")
 
-def sanitize_evidence(evidence: str) -> str:
+
+def _evidence_has_prompt_example_leak(evidence: str, conversation_text: str) -> bool:
+    if not evidence:
+        return False
+    convo = conversation_text or ""
+    return any(tok in evidence and tok not in convo for tok in _EVIDENCE_PROMPT_EXAMPLE_TOKENS)
+
+
+def sanitize_evidence(evidence: str, conversation_text: str = "") -> str:
     """Clean LLM evidence strings before display.
 
     Why: Typhoon-8B sometimes copies the JSON-schema placeholder
     (e.g. "[ข้อ + quote สั้น]") straight into politeness_evidence /
     problem_solving_evidence, leaving users staring at template syntax instead
     of real findings. Also drops vague summaries like "ทำได้: ทุกข้อ" that
-    carry no quotes or item names.
+    carry no quotes or item names, and prompt-example tokens (e.g.
+    "ร้านที่นอนพลอย") that the model lifted from the QA prompt even though the
+    real conversation never said them.
     """
     if not evidence:
         return ""
     text = str(evidence).strip()
     if _evidence_is_leaked(text) or _evidence_is_vague(text):
         log.warning("sanitize_evidence: detected leaked/vague evidence %r", text[:120])
+        return _EVIDENCE_FALLBACK
+    if _evidence_has_prompt_example_leak(text, conversation_text):
+        log.warning(
+            "sanitize_evidence: evidence quotes prompt-example token absent from transcript %r",
+            text[:120],
+        )
         return _EVIDENCE_FALLBACK
     return text
 
@@ -475,9 +496,9 @@ def evaluate_agent_qa(conversation) -> dict:
 
     agent_perf = {
         "politeness": politeness,
-        "politeness_evidence": sanitize_evidence(result.get("politeness_evidence", "")),
+        "politeness_evidence": sanitize_evidence(result.get("politeness_evidence", ""), text),
         "problem_solving": problem_solving,
-        "problem_solving_evidence": sanitize_evidence(result.get("problem_solving_evidence", "")),
+        "problem_solving_evidence": sanitize_evidence(result.get("problem_solving_evidence", ""), text),
         "overall_score": overall_score,
         "next_action": next_action,
         "next_action_owner": next_action_owner,

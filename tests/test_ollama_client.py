@@ -228,8 +228,10 @@ class TestSanitizeEvidence(unittest.TestCase):
         self.assertNotIn("ทุกข้อ", out)
 
     def test_vague_summary_with_real_quote_is_kept(self):
-        # If the model says "ทุกข้อ" but ALSO supplies an Agent quote, accept it
-        text = "ทำได้: ทุกข้อ เช่น ทักทาย ('สวัสดีค่ะ พลอยค่ะ') / ไม่ได้: ไม่มี"
+        # If the model says "ทุกข้อ" but ALSO supplies an Agent quote, accept it.
+        # Avoid the old "พลอยค่ะ" fixture — it now matches the prompt-example
+        # leak list and would be scrubbed when no conversation_text is provided.
+        text = "ทำได้: ทุกข้อ เช่น ทักทาย ('สวัสดีค่ะ ขอบคุณที่ติดต่อ') / ไม่ได้: ไม่มี"
         self.assertEqual(ollama_client.sanitize_evidence(text), text)
 
     def test_specific_evidence_without_quote_but_with_no_evidence_marker(self):
@@ -258,6 +260,69 @@ class TestSanitizeEvidence(unittest.TestCase):
         ap = json.loads(out["agent_performance"])
         self.assertNotIn("[", ap["politeness_evidence"])
         self.assertNotIn("[", ap["problem_solving_evidence"])
+
+    def test_prompt_example_token_scrubbed_when_absent_from_transcript(self):
+        # Typhoon-8B used to lift "ร้านที่นอนพลอย" from the prompt example into
+        # nearly every politeness_evidence — must be detected and scrubbed when
+        # the real transcript never said it.
+        text = "ทำได้: ทักทายเปิดสาย ('สวัสดีค่ะ ร้านที่นอนพลอย'), แนะนำตัว ('พลอยค่ะ') / ไม่ได้: ไม่ทวนชื่อ (ไม่พบหลักฐาน)"
+        transcript = "Agent: สวัสดีค่ะ บริษัทเอบีซี ยินดีให้บริการค่ะ\nCustomer: ครับ"
+        out = ollama_client.sanitize_evidence(text, transcript)
+        self.assertNotIn("ร้านที่นอนพลอย", out)
+        self.assertNotIn("พลอยค่ะ", out)
+        self.assertTrue(out)
+
+    def test_prompt_example_token_kept_when_present_in_transcript(self):
+        # If the agent really did say it on this call, the same string in
+        # evidence is genuine evidence, not leakage — must NOT be scrubbed.
+        text = "ทำได้: ทักทายเปิดสาย ('สวัสดีค่ะ ร้านที่นอนพลอย') / ไม่ได้: ไม่ทวนชื่อ (ไม่พบหลักฐาน)"
+        transcript = "Agent: สวัสดีค่ะ ร้านที่นอนพลอย ยินดีให้บริการค่ะ"
+        self.assertEqual(ollama_client.sanitize_evidence(text, transcript), text)
+
+    def test_evaluate_agent_qa_scrubs_prompt_example_leak_end_to_end(self):
+        # End-to-end: when the LLM emits the canonical leaked example but the
+        # mocked transcript doesn't contain those tokens, the saved JSON must
+        # not surface them to the dashboard.
+        payload = {
+            "politeness": 5,
+            "politeness_evidence": "ทำได้: ทักทายเปิดสาย ('สวัสดีค่ะ ร้านที่นอนพลอย'), แนะนำตัว ('พลอยค่ะ')",
+            "problem_solving": 5,
+            "problem_solving_evidence": "ทำได้: เข้าใจปัญหา ('ใช้ที่นอนแล้วนอนไม่หลับ')",
+            "overall_score": 10,
+            "next_action": "ไม่มี — เคสปิดสมบูรณ์",
+            "next_action_owner": "ไม่มี",
+        }
+        with patch.object(ollama_client, "chat", return_value=json.dumps(payload, ensure_ascii=False)):
+            out = ollama_client.evaluate_agent_qa([
+                {"speaker": "Agent", "text": "สวัสดีค่ะ บริษัทเอบีซี ยินดีให้บริการค่ะ"},
+                {"speaker": "Customer", "text": "ครับ"},
+            ])
+        ap = json.loads(out["agent_performance"])
+        self.assertNotIn("ร้านที่นอนพลอย", ap["politeness_evidence"])
+        self.assertNotIn("พลอยค่ะ", ap["politeness_evidence"])
+        # problem_solving quote came from the (mocked) transcript context and
+        # is unrelated to the leak token — should be preserved.
+        self.assertIn("เข้าใจปัญหา", ap["problem_solving_evidence"])
+
+
+class TestPromptHasNoFakeExampleValues(unittest.TestCase):
+    """Regression for the 'ร้านที่นอนพลอย' incident: the Agent QA prompt's
+    'รูปแบบที่ถูก' example must not contain concrete fake values that Typhoon
+    can copy verbatim into politeness_evidence on every call.
+
+    Why a structural test: sanitize_evidence is a runtime safety net, but the
+    real fix is keeping fake values out of the prompt in the first place.
+    """
+
+    def test_agent_qa_prompt_has_no_fake_shop_name(self):
+        from smartvoice import prompts
+        self.assertNotIn("ร้านที่นอนพลอย", prompts.AGENT_QA_USER)
+
+    def test_agent_qa_prompt_has_no_fake_agent_self_quote(self):
+        # 'พลอยค่ะ' as a standalone fake quote in the Agent QA example was the
+        # other half of the leak — must not reappear in the QA prompt body.
+        from smartvoice import prompts
+        self.assertNotIn("'พลอยค่ะ'", prompts.AGENT_QA_USER)
 
 
 class TestCorrectSpeakersRobustness(unittest.TestCase):
