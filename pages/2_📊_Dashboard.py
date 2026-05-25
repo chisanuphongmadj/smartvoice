@@ -1,4 +1,5 @@
 import json
+import math
 from collections import Counter, defaultdict
 
 import pandas as pd
@@ -13,23 +14,84 @@ from smartvoice.ui_helpers import init_page, metric_card, sentiment_emoji
 
 init_page()
 
+# Page-scoped CSS — ขยาย caption / small text ให้อ่านง่ายขึ้น (เฉพาะหน้า Dashboard)
+st.markdown(
+    """
+    <style>
+      /* caption (st.caption) — ใหญ่และคอนทราสต์สูงขึ้น */
+      div[data-testid="stCaptionContainer"],
+      div[data-testid="stCaptionContainer"] p,
+      div[data-testid="stCaptionContainer"] small {
+          font-size: 0.95rem !important;
+          font-weight: 500 !important;
+          color: #cbd5e1 !important;
+          line-height: 1.55 !important;
+      }
+      /* subheader (st.subheader) — เด่นขึ้นเพื่อแยก section */
+      div[data-testid="stHeadingWithActionElements"] h3 {
+          font-size: 1.45rem !important;
+          font-weight: 700 !important;
+      }
+      /* expander label (Filters) — อ่านง่ายขึ้น */
+      details[data-testid="stExpander"] summary p {
+          font-size: 1.05rem !important;
+          font-weight: 600 !important;
+      }
+      /* dataframe header + cell — เพิ่ม readability */
+      div[data-testid="stDataFrame"] [role="columnheader"] {
+          font-size: 0.95rem !important;
+          font-weight: 700 !important;
+      }
+      div[data-testid="stDataFrame"] [role="gridcell"] {
+          font-size: 0.95rem !important;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ─────────────────────────────────────────
 # PAGE: DASHBOARD — Analytics
 # ─────────────────────────────────────────
 st.title("📊 Dashboard — Analytics")
 
-done_calls = db.get_done_calls()
+# ── Scale-friendly loading: cap rows by user-selected limit ─────────────
+# ทางบริษัทมีไฟล์เสียงหลักหมื่น — โหลดทั้งตารางทุกครั้งจะหน่วงระบบ
+_LIMIT_OPTIONS = {
+    "100 สายล่าสุด": 100,
+    "500 สายล่าสุด": 500,
+    "1,000 สายล่าสุด": 1000,
+    "5,000 สายล่าสุด": 5000,
+    "ทั้งหมด (อาจช้าเมื่อข้อมูลเยอะ)": None,
+}
+
+total_in_db = db.count_done_calls()
+
+if total_in_db == 0:
+    st.info("No completed calls yet. Upload and process audio files from the Admin page.")
+    st.stop()
+
+# Default — ทั้งหมดถ้า ≤ 500 สาย ไม่งั้น 500 ล่าสุด
+_default_limit_label = (
+    "ทั้งหมด (อาจช้าเมื่อข้อมูลเยอะ)" if total_in_db <= 500 else "500 สายล่าสุด"
+)
+if "dashboard_load_limit" not in st.session_state:
+    st.session_state["dashboard_load_limit"] = _default_limit_label
+
+_current_limit = _LIMIT_OPTIONS.get(st.session_state["dashboard_load_limit"], 500)
+done_calls = db.get_done_calls(limit=_current_limit)
 
 if not done_calls:
-    st.info("No completed calls yet. Upload and process audio files from the Admin page.")
+    st.info("No completed calls match the selected scope.")
     st.stop()
 
 df = pd.DataFrame(done_calls)
 df["created_at"] = pd.to_datetime(df["created_at"])
+loaded_count = len(df)
 
-# ── Filters ──────────────────────────────────────────────────────────────
-with st.expander("🔍 Filters", expanded=False):
-    f_col1, f_col2, f_col3 = st.columns([1, 1, 1])
+# ── Filters (เปิดโดย default เพื่อให้ผู้ใช้เห็นวิธีลดข้อมูลได้ทันที) ────────────
+with st.expander("🔍 Filters", expanded=True):
+    f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1, 1.2])
     with f_col1:
         min_date = df["created_at"].dt.date.min()
         max_date = df["created_at"].dt.date.max()
@@ -45,6 +107,23 @@ with st.expander("🔍 Filters", expanded=False):
     with f_col3:
         sentiment_options = ["All", "positive", "neutral", "negative"]
         selected_sentiment = st.selectbox("Sentiment", sentiment_options)
+    with f_col4:
+        st.selectbox(
+            "จำนวนสายที่โหลด",
+            list(_LIMIT_OPTIONS.keys()),
+            key="dashboard_load_limit",
+            help=f"ระบบมีทั้งหมด {total_in_db:,} สาย — เลือกจำนวนที่ต้องการโหลดเพื่อวิเคราะห์",
+        )
+
+# Info banner — ให้ผู้ใช้รู้ scope ที่กำลังดูอยู่
+if _current_limit is not None and loaded_count < total_in_db:
+    st.info(
+        f"📊 กำลังวิเคราะห์ **{loaded_count:,}** สายล่าสุด จากทั้งหมด "
+        f"**{total_in_db:,}** สายในระบบ — ปรับ *'จำนวนสายที่โหลด'* "
+        f"ใน Filter เพื่อโหลดเพิ่มหรือลดลง"
+    )
+else:
+    st.success(f"✅ กำลังวิเคราะห์ทั้งหมด **{loaded_count:,}** สายในระบบ")
 
 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     start_date, end_date = date_range
@@ -87,26 +166,46 @@ chart_col1, chart_col2 = st.columns(2)
 _CHART_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font_color="#e5e7eb",
+    # ปรับให้ axis ticks, axis titles, legend อ่านง่ายขึ้น (เดิม Plotly default = 12)
+    font=dict(color="#e5e7eb", size=15, weight=500),
     showlegend=False,
+    bargap=0.45,
 )
+
+# เลขบนแท่ง (text labels) — ใหญ่ + หนาให้เห็นชัดบนพื้นมืด
+_BAR_TEXTFONT = dict(size=16, color="#f8fafc", weight=700)
+
+# Omazz brand palettes — โทนน้ำเงิน sky/navy บนพื้นดำตาม brand identity
+# (แท่งค่าน้อยสีอ่อน, ค่ามากสีเข้ม → สื่อลำดับความสำคัญทันที)
+_SCALE_BRAND = [[0, "#bae6fd"], [1, "#0369a1"]]    # sky → ocean (โลโก้ Omazz)
+_SCALE_NAVY = [[0, "#93c5fd"], [1, "#1e3a8a"]]     # ฟ้าอ่อน → navy (premium dark)
+_SCALE_TEAL = [[0, "#99f6e4"], [1, "#0e7490"]]     # mint → teal/cyan
+_SCALE_STEEL = [[0, "#cbd5e1"], [1, "#475569"]]    # slate (เข้ากับพื้นดำ)
+_SCALE_RED = [[0, "#fecaca"], [1, "#b91c1c"]]      # warning (เฉพาะ problem/issue)
+_BAR_CORNER = 8
 
 with chart_col1:
     st.subheader("Sentiment Distribution")
     sentiment_counts = df["sentiment"].value_counts().reset_index()
     sentiment_counts.columns = ["Sentiment", "Count"]
-    color_map = {"positive": "#22c55e", "neutral": "#eab308", "negative": "#ef4444"}
+    # Sentiment: เก็บความหมาย semantic ไว้ แต่ปรับโทนให้เข้ากับพื้น dark + brand
+    # — positive=เขียวมิ้นต์ (อ่านง่ายบนพื้นดำ), neutral=สเลทเทาฟ้า (เข้า brand), negative=แดงนวล
+    color_map = {"positive": "#34d399", "neutral": "#94a3b8", "negative": "#f87171"}
     fig_sentiment = px.bar(
         sentiment_counts, x="Sentiment", y="Count",
         color="Sentiment", color_discrete_map=color_map, text="Count",
     )
     fig_sentiment.update_traces(
         textposition="outside",
+        textfont=_BAR_TEXTFONT,
+        marker=dict(cornerradius=_BAR_CORNER, line=dict(width=0)),
         hovertemplate="<b>%{x}</b><br>จำนวน: %{y} สาย<extra></extra>",
     )
     fig_sentiment.update_layout(
         **_CHART_LAYOUT, xaxis_title="", yaxis_title="จำนวนสาย",
         margin=dict(t=30, b=10),
+        yaxis=dict(gridcolor="rgba(148,163,184,0.15)", zeroline=False),
+        xaxis=dict(showgrid=False),
     )
     st.plotly_chart(fig_sentiment, width="stretch")
 
@@ -115,14 +214,21 @@ with chart_col2:
     topic_series = df["topic"].replace("", pd.NA).dropna()
     topic_counts = topic_series.value_counts().reset_index()
     topic_counts.columns = ["Topic", "Count"]
-    fig_topic = px.bar(topic_counts, x="Count", y="Topic", orientation="h", text="Count")
+    fig_topic = px.bar(
+        topic_counts, x="Count", y="Topic", orientation="h", text="Count",
+        color="Count", color_continuous_scale=_SCALE_BRAND,
+    )
     fig_topic.update_traces(
-        marker_color="#3b82f6", textposition="outside",
+        textposition="outside",
+        textfont=_BAR_TEXTFONT,
+        marker=dict(cornerradius=_BAR_CORNER, line=dict(width=0)),
         hovertemplate="<b>%{y}</b><br>จำนวน: %{x} สาย<extra></extra>",
     )
     fig_topic.update_layout(
         **_CHART_LAYOUT, xaxis_title="จำนวนสาย", yaxis_title="",
         margin=dict(t=20, b=20, r=60), yaxis=dict(autorange="reversed"),
+        coloraxis_showscale=False,
+        xaxis=dict(gridcolor="rgba(148,163,184,0.15)", zeroline=False),
     )
     st.plotly_chart(fig_topic, width="stretch")
 
@@ -150,16 +256,23 @@ with kw_col:
             kw_counts = Counter(all_keywords).most_common(15)
             kw_df = pd.DataFrame(kw_counts, columns=["Keyword", "Count"])
             kw_max = kw_df["Count"].max()
-            fig_kw = px.bar(kw_df, x="Count", y="Keyword", orientation="h", text="Count")
+            fig_kw = px.bar(
+                kw_df, x="Count", y="Keyword", orientation="h", text="Count",
+                color="Count", color_continuous_scale=_SCALE_NAVY,
+            )
             fig_kw.update_traces(
-                marker_color="#3b82f6", textposition="outside",
+                textposition="outside",
+                textfont=_BAR_TEXTFONT,
+                marker=dict(cornerradius=_BAR_CORNER, line=dict(width=0)),
                 hovertemplate="<b>%{y}</b><br>พบ: %{x} ครั้ง<extra></extra>",
             )
             fig_kw.update_layout(
                 **_CHART_LAYOUT, xaxis_title="จำนวนครั้ง", yaxis_title="",
                 margin=dict(t=20, b=20, r=20),
                 yaxis=dict(autorange="reversed"),
-                xaxis=dict(range=[0, kw_max * 1.25]),
+                xaxis=dict(range=[0, kw_max * 1.25],
+                           gridcolor="rgba(148,163,184,0.15)", zeroline=False),
+                coloraxis_showscale=False,
             )
             st.plotly_chart(fig_kw, width="stretch")
         else:
@@ -180,15 +293,24 @@ with kw_col:
         if all_brands:
             brand_counts = Counter(all_brands).most_common(15)
             brand_df = pd.DataFrame(brand_counts, columns=["Brand", "Count"])
-            fig_brand = px.bar(brand_df, x="Count", y="Brand", orientation="h", text="Count")
+            brand_max = brand_df["Count"].max()
+            fig_brand = px.bar(
+                brand_df, x="Count", y="Brand", orientation="h", text="Count",
+                color="Count", color_continuous_scale=_SCALE_TEAL,
+            )
             fig_brand.update_traces(
-                marker_color="#10b981", textposition="outside",
+                textposition="outside",
+                textfont=_BAR_TEXTFONT,
+                marker=dict(cornerradius=_BAR_CORNER, line=dict(width=0)),
                 hovertemplate="<b>%{y}</b><br>พบ: %{x} ครั้ง<extra></extra>",
             )
             fig_brand.update_layout(
                 **_CHART_LAYOUT, xaxis_title="จำนวนครั้ง", yaxis_title="",
                 margin=dict(t=20, b=20, r=50),
                 yaxis=dict(autorange="reversed"),
+                xaxis=dict(range=[0, brand_max * 1.25],
+                           gridcolor="rgba(148,163,184,0.15)", zeroline=False),
+                coloraxis_showscale=False,
             )
             st.plotly_chart(fig_brand, width="stretch")
         else:
@@ -211,15 +333,24 @@ for call in done_calls:
 if all_platforms:
     plat_counts = Counter(all_platforms).most_common(15)
     plat_df = pd.DataFrame(plat_counts, columns=["Platform", "Count"])
-    fig_plat = px.bar(plat_df, x="Count", y="Platform", orientation="h", text="Count")
+    plat_max = plat_df["Count"].max()
+    fig_plat = px.bar(
+        plat_df, x="Count", y="Platform", orientation="h", text="Count",
+        color="Count", color_continuous_scale=_SCALE_STEEL,
+    )
     fig_plat.update_traces(
-        marker_color="#f59e0b", textposition="outside",
+        textposition="outside",
+        textfont=_BAR_TEXTFONT,
+        marker=dict(cornerradius=_BAR_CORNER, line=dict(width=0)),
         hovertemplate="<b>%{y}</b><br>พบ: %{x} ครั้ง<extra></extra>",
     )
     fig_plat.update_layout(
         **_CHART_LAYOUT, xaxis_title="จำนวนครั้ง", yaxis_title="",
         margin=dict(t=20, b=20, r=50),
-        yaxis=dict(autorange="reversed"), height=300,
+        yaxis=dict(autorange="reversed"), height=max(220, 60 + 38 * len(plat_df)),
+        xaxis=dict(range=[0, plat_max * 1.25],
+                   gridcolor="rgba(148,163,184,0.15)", zeroline=False),
+        coloraxis_showscale=False,
     )
     st.plotly_chart(fig_plat, width="stretch")
 else:
@@ -257,15 +388,24 @@ if issue_calls:
     ).most_common(3)
     if issue_topic_counts:
         issue_df = pd.DataFrame(issue_topic_counts, columns=["Issue / Topic", "Count"])
-        fig_issues = px.bar(issue_df, x="Count", y="Issue / Topic", orientation="h", text="Count")
+        issue_max = issue_df["Count"].max()
+        fig_issues = px.bar(
+            issue_df, x="Count", y="Issue / Topic", orientation="h", text="Count",
+            color="Count", color_continuous_scale=_SCALE_RED,
+        )
         fig_issues.update_traces(
-            marker_color="#ef4444", textposition="outside",
+            textposition="outside",
+            textfont=_BAR_TEXTFONT,
+            marker=dict(cornerradius=_BAR_CORNER, line=dict(width=0)),
             hovertemplate="<b>%{y}</b><br>จำนวน: %{x} สาย<extra></extra>",
         )
         fig_issues.update_layout(
             **_CHART_LAYOUT, xaxis_title="จำนวนสาย", yaxis_title="",
             margin=dict(t=20, b=20, r=50),
-            yaxis=dict(autorange="reversed"), height=220,
+            yaxis=dict(autorange="reversed"), height=max(200, 60 + 50 * len(issue_df)),
+            xaxis=dict(range=[0, issue_max * 1.25],
+                       gridcolor="rgba(148,163,184,0.15)", zeroline=False),
+            coloraxis_showscale=False,
         )
         st.plotly_chart(fig_issues, width="stretch")
         st.caption(f"จาก {len(issue_calls)} สาย (Negative sentiment + Anomaly)")
@@ -284,9 +424,9 @@ st.caption(
     "— เคสที่ปิดแล้วจะไม่แสดง Next Action"
 )
 
-def _short_evidence(value: str) -> str:
+def _short_evidence(value: str, transcript: str = "") -> str:
     text = " ".join(str(value or "").split())
-    cleaned = sanitize_evidence(text)
+    cleaned = sanitize_evidence(text, transcript)
     return cleaned or "—"
 
 def _score_value(value) -> float:
@@ -321,8 +461,8 @@ for call in done_calls:
             "politeness": politeness,
             "problem_solving": problem_solving,
             "overall_score": politeness + problem_solving,
-            "politeness_evidence": _short_evidence(ap.get("politeness_evidence", "")),
-            "problem_solving_evidence": _short_evidence(ap.get("problem_solving_evidence", "")),
+            "politeness_evidence": _short_evidence(ap.get("politeness_evidence", ""), call.get("transcript") or ""),
+            "problem_solving_evidence": _short_evidence(ap.get("problem_solving_evidence", ""), call.get("transcript") or ""),
             "next_action": next_action,
             "next_action_owner": next_action_owner,
         })
@@ -396,21 +536,21 @@ if agent_rows:
     agent_rows.sort(key=lambda r: r["_sort"], reverse=True)
     for r in agent_rows:
         r.pop("_sort", None)
-    ap_df = pd.DataFrame(agent_rows)
-    avg_score = ap_df["Score"].mean()
+    ap_df_full = pd.DataFrame(agent_rows)
+    avg_score = ap_df_full["Score"].mean()
 
     ag1, ag2, ag3 = st.columns(3)
     with ag1:
         st.markdown(metric_card(f"{avg_score:.1f}", "Avg Agent Score / 10"), unsafe_allow_html=True)
     with ag2:
-        best = ap_df.loc[ap_df["Score"].idxmax(), "Label"]
+        best = ap_df_full.loc[ap_df_full["Score"].idxmax(), "Label"]
         st.markdown(
             f'<div class="metric-card"><div class="metric-value" style="font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="{best}">{best}</div>'
             f'<div class="metric-label">Best 🏆</div></div>',
             unsafe_allow_html=True,
         )
     with ag3:
-        worst = ap_df.loc[ap_df["Score"].idxmin(), "Label"]
+        worst = ap_df_full.loc[ap_df_full["Score"].idxmin(), "Label"]
         st.markdown(
             f'<div class="metric-card"><div class="metric-value" style="font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="{worst}">{worst}</div>'
             f'<div class="metric-label">Needs Improvement 📋</div></div>',
@@ -418,19 +558,90 @@ if agent_rows:
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.dataframe(
-        ap_df,
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Label": st.column_config.TextColumn("สาย / เคส", width="large"),
-            "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%.1f / 10"),
-            "Politeness Evidence": st.column_config.TextColumn("หลักฐาน Politeness", width="large"),
-            "Problem Solving Evidence": st.column_config.TextColumn("หลักฐาน Problem Solving", width="large"),
-            "Next Action": st.column_config.TextColumn("Next Action 📌", width="large"),
-            "Owner": st.column_config.TextColumn("ผู้รับผิดชอบ 👤", width="medium"),
-        },
-    )
+
+    # ── Search + pagination — กันแถวเยอะเกินเมื่อโหลดสายจำนวนมาก ────────────
+    ap_search_col, ap_score_col, ap_size_col = st.columns([2.2, 1.4, 1])
+    with ap_search_col:
+        ap_search = st.text_input(
+            "🔍 ค้นหา (เบอร์ / ชื่อไฟล์ / Subject / Next Action)",
+            key="agent_perf_search",
+            placeholder="เช่น 081-999-9336, แจ้งปัญหา, ติดตาม",
+        )
+    with ap_score_col:
+        ap_score_filter = st.selectbox(
+            "กรองตามคะแนน",
+            ["ทั้งหมด", "< 6 (ต้องปรับปรุง)", "6–7.9 (พอใช้)", "≥ 8 (ดี)"],
+            key="agent_perf_score",
+        )
+    with ap_size_col:
+        ap_page_size = st.selectbox(
+            "แถวต่อหน้า",
+            [10, 25, 50, 100],
+            index=1,
+            key="agent_perf_page_size",
+        )
+
+    ap_df = ap_df_full.copy()
+    if ap_search:
+        s = ap_search.strip()
+        mask = (
+            ap_df["Label"].str.contains(s, case=False, na=False)
+            | ap_df["Next Action"].astype(str).str.contains(s, case=False, na=False)
+        )
+        ap_df = ap_df[mask]
+    if ap_score_filter == "< 6 (ต้องปรับปรุง)":
+        ap_df = ap_df[ap_df["Score"] < 6]
+    elif ap_score_filter == "6–7.9 (พอใช้)":
+        ap_df = ap_df[(ap_df["Score"] >= 6) & (ap_df["Score"] < 8)]
+    elif ap_score_filter == "≥ 8 (ดี)":
+        ap_df = ap_df[ap_df["Score"] >= 8]
+
+    ap_total = len(ap_df)
+    ap_n_pages = max(1, math.ceil(ap_total / ap_page_size)) if ap_total else 1
+    if st.session_state.get("agent_perf_page", 1) > ap_n_pages:
+        st.session_state["agent_perf_page"] = 1
+
+    pg_col, info_col = st.columns([1, 3])
+    with pg_col:
+        ap_page = st.number_input(
+            f"หน้า (รวม {ap_n_pages:,} หน้า)",
+            min_value=1,
+            max_value=ap_n_pages,
+            step=1,
+            key="agent_perf_page",
+        )
+    ap_start = (ap_page - 1) * ap_page_size
+    ap_end = ap_start + ap_page_size
+    with info_col:
+        if ap_total == 0:
+            st.markdown(
+                "<div style='padding-top:1.95rem;color:#fbbf24;font-size:0.95rem;font-weight:500'>"
+                "ไม่พบแถวที่ตรงกับเงื่อนไข — ลองล้าง search หรือเปลี่ยน 'กรองตามคะแนน'</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"<div style='padding-top:1.95rem;color:#cbd5e1;font-size:0.95rem;font-weight:500'>"
+                f"แถว <b style='color:#38bdf8'>{ap_start + 1:,}–{min(ap_end, ap_total):,}</b> "
+                f"จาก <b style='color:#38bdf8'>{ap_total:,}</b> รายการ "
+                f"(ทั้งหมด <b style='color:#38bdf8'>{len(ap_df_full):,}</b>)</div>",
+                unsafe_allow_html=True,
+            )
+
+    if ap_total > 0:
+        st.dataframe(
+            ap_df.iloc[ap_start:ap_end],
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Label": st.column_config.TextColumn("สาย / เคส", width="large"),
+                "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%.1f / 10"),
+                "Politeness Evidence": st.column_config.TextColumn("หลักฐาน Politeness", width="large"),
+                "Problem Solving Evidence": st.column_config.TextColumn("หลักฐาน Problem Solving", width="large"),
+                "Next Action": st.column_config.TextColumn("Next Action 📌", width="large"),
+                "Owner": st.column_config.TextColumn("ผู้รับผิดชอบ 👤", width="medium"),
+            },
+        )
 else:
     st.caption("ยังไม่มีข้อมูล Agent Performance — re-process ไฟล์เสียงเพื่อดูผล")
 
@@ -440,7 +651,6 @@ st.divider()
 st.subheader("📂 Case Management")
 
 case_counts = db.get_case_counts()
-all_cases = db.get_all_cases()
 
 cs_col1, cs_col2, cs_col3, cs_col4 = st.columns(4)
 with cs_col1:
@@ -452,33 +662,105 @@ with cs_col3:
 with cs_col4:
     st.markdown(metric_card(case_counts["closed"], "🔴 ปิด (Closed)", "#ef4444"), unsafe_allow_html=True)
 
-if all_cases:
+if case_counts["total"] > 0:
     st.markdown("<br>", unsafe_allow_html=True)
-    case_rows = []
-    _case_badge = {"open": "🟢 เปิด", "follow_up": "🟡 ติดตาม", "closed": "🔴 ปิด"}
-    for cs in all_cases:
-        customer_name = (
-            f"{cs.get('first_name', '')} {cs.get('last_name', '')}".strip() or "—"
+
+    # ── Filter row — push status/search down to SQL ─────────────────────
+    _STATUS_OPTIONS = {
+        "ทั้งหมด": None,
+        "🟢 เปิด (Open)": "open",
+        "🟡 ติดตาม (Follow-up)": "follow_up",
+        "🔴 ปิด (Closed)": "closed",
+    }
+    cf_status_col, cf_search_col, cf_size_col = st.columns([1.2, 2.2, 1])
+    with cf_status_col:
+        cs_status_label = st.selectbox(
+            "Status",
+            list(_STATUS_OPTIONS.keys()),
+            key="case_status_filter",
         )
-        case_rows.append({
-            "Case ID": cs["id"],
-            "Subject": cs["subject"],
-            "Customer": customer_name,
-            "Phone": cs.get("phone") or "—",
-            "Calls": cs.get("call_count", 0),
-            "Status": _case_badge.get(cs["status"], cs["status"]),
-            "Updated": cs.get("updated_at", "")[:10],
-        })
-    cases_df = pd.DataFrame(case_rows)
-    st.dataframe(
-        cases_df,
-        width="stretch",
-        hide_index=True,
-        column_config={
-            "Subject": st.column_config.TextColumn(width="large"),
-            "Customer": st.column_config.TextColumn(width="medium"),
-        },
+    with cf_search_col:
+        cs_search = st.text_input(
+            "🔍 ค้นหา (Subject / ชื่อลูกค้า / เบอร์)",
+            key="case_search",
+            placeholder="เช่น แจ้งปัญหา, สุภาพร, 0819999336",
+        )
+    with cf_size_col:
+        cs_page_size = st.selectbox(
+            "แถวต่อหน้า",
+            [10, 25, 50, 100],
+            index=1,
+            key="case_page_size",
+        )
+
+    # ดึงจำนวน + page ตาม filter (SQL-level — เร็วแม้ DB ใหญ่)
+    cs_status = _STATUS_OPTIONS[cs_status_label]
+    cs_search_clean = cs_search.strip() or None
+    cs_total_filtered = db.count_cases(status=cs_status, search=cs_search_clean)
+    cs_n_pages = max(1, math.ceil(cs_total_filtered / cs_page_size)) if cs_total_filtered else 1
+    if st.session_state.get("case_page", 1) > cs_n_pages:
+        st.session_state["case_page"] = 1
+
+    pg_col, info_col = st.columns([1, 3])
+    with pg_col:
+        cs_page = st.number_input(
+            f"หน้า (รวม {cs_n_pages:,} หน้า)",
+            min_value=1,
+            max_value=cs_n_pages,
+            step=1,
+            key="case_page",
+        )
+    cs_start = (cs_page - 1) * cs_page_size
+    cs_end = cs_start + cs_page_size
+    with info_col:
+        if cs_total_filtered == 0:
+            st.markdown(
+                "<div style='padding-top:1.95rem;color:#fbbf24;font-size:0.95rem;font-weight:500'>"
+                "ไม่พบเคสที่ตรงกับเงื่อนไข — ลองล้าง search หรือเปลี่ยน Status</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"<div style='padding-top:1.95rem;color:#cbd5e1;font-size:0.95rem;font-weight:500'>"
+                f"แถว <b style='color:#38bdf8'>{cs_start + 1:,}–{min(cs_end, cs_total_filtered):,}</b> "
+                f"จาก <b style='color:#38bdf8'>{cs_total_filtered:,}</b> เคส "
+                f"(ในระบบทั้งหมด <b style='color:#38bdf8'>{case_counts['total']:,}</b>)</div>",
+                unsafe_allow_html=True,
+            )
+
+    all_cases = db.get_all_cases(
+        limit=cs_page_size,
+        offset=cs_start,
+        status=cs_status,
+        search=cs_search_clean,
     )
+
+    if all_cases:
+        case_rows = []
+        _case_badge = {"open": "🟢 เปิด", "follow_up": "🟡 ติดตาม", "closed": "🔴 ปิด"}
+        for cs in all_cases:
+            customer_name = (
+                f"{cs.get('first_name', '')} {cs.get('last_name', '')}".strip() or "—"
+            )
+            case_rows.append({
+                "Case ID": cs["id"],
+                "Subject": cs["subject"],
+                "Customer": customer_name,
+                "Phone": cs.get("phone") or "—",
+                "Calls": cs.get("call_count", 0),
+                "Status": _case_badge.get(cs["status"], cs["status"]),
+                "Updated": cs.get("updated_at", "")[:10],
+            })
+        cases_df = pd.DataFrame(case_rows)
+        st.dataframe(
+            cases_df,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Subject": st.column_config.TextColumn(width="large"),
+                "Customer": st.column_config.TextColumn(width="medium"),
+            },
+        )
 else:
     st.caption("ยังไม่มีเคสในระบบ — เคสจะถูกสร้างอัตโนมัติหลัง process สาย")
 
@@ -513,8 +795,48 @@ display_df["anomaly_detected"] = display_df["anomaly_detected"].map(lambda v: "�
 display_df["created_at"] = pd.to_datetime(display_df["created_at"]).dt.strftime("%Y-%m-%d %H:%M:%S")
 display_df.columns = ["Filename", "Sentiment", "Topic", "Keywords", "Anomaly", "Summary", "Created (UTC)"]
 
+# ── Pagination — กันตาราง render แถวเป็นพัน ทำให้หน้าช้า ────────────────
+_PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
+total_rows = len(display_df)
+n_pages = max(1, math.ceil(total_rows / _PAGE_SIZE_OPTIONS[1])) if total_rows else 1
+
+ps_col, pg_col, info_col = st.columns([1, 1, 2])
+with ps_col:
+    page_size = st.selectbox(
+        "แถวต่อหน้า",
+        _PAGE_SIZE_OPTIONS,
+        index=1,  # default 50
+        key="dashboard_page_size",
+    )
+n_pages = max(1, math.ceil(total_rows / page_size)) if total_rows else 1
+# clamp ค่า page ถ้า filter ทำให้แถวลด/หรือ page_size เปลี่ยน
+_saved_page = st.session_state.get("dashboard_page", 1)
+if _saved_page > n_pages:
+    st.session_state["dashboard_page"] = 1
+with pg_col:
+    page = st.number_input(
+        f"หน้า (รวม {n_pages:,} หน้า)",
+        min_value=1,
+        max_value=n_pages,
+        step=1,
+        key="dashboard_page",
+    )
+
+start = (page - 1) * page_size
+end = start + page_size
+page_df = display_df.iloc[start:end]
+
+with info_col:
+    st.markdown(
+        f"<div style='padding-top:1.95rem;color:#cbd5e1;font-size:0.95rem;font-weight:500'>"
+        f"แถว <b style='color:#38bdf8'>{start + 1:,}–{min(end, total_rows):,}</b> "
+        f"จากทั้งหมด <b style='color:#38bdf8'>{total_rows:,}</b> สาย "
+        f"(ตามผล filter)</div>",
+        unsafe_allow_html=True,
+    )
+
 st.dataframe(
-    display_df,
+    page_df,
     width="stretch",
     hide_index=True,
     column_config={
@@ -524,4 +846,10 @@ st.dataframe(
     },
 )
 
-st.markdown(f"<br><small style='color:#6b7280'>Showing {len(filtered_df)} of {total} calls</small>", unsafe_allow_html=True)
+st.markdown(
+    f"<br><span style='color:#cbd5e1;font-size:1rem;font-weight:500'>"
+    f"แสดง <b style='color:#38bdf8'>{len(filtered_df):,}</b> จากที่โหลด "
+    f"<b style='color:#38bdf8'>{total:,}</b> สาย "
+    f"(ระบบมีทั้งหมด <b style='color:#38bdf8'>{total_in_db:,}</b> สาย)</span>",
+    unsafe_allow_html=True,
+)

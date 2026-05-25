@@ -23,13 +23,13 @@ _CSS = """
 .stApp { background-color: #0f1117; }
 section[data-testid="stSidebar"] { background-color: #1a1d27; }
 .metric-card {
-    background: linear-gradient(135deg, #1e2130, #252a3a);
-    border: 1px solid #2d3250;
+    background: linear-gradient(135deg, #0b1a2b, #15243a);
+    border: 1px solid #1e3a5f;
     border-radius: 12px;
     padding: 20px;
     text-align: center;
 }
-.metric-value { font-size: 2.5rem; font-weight: 700; color: #7c83f0; }
+.metric-value { font-size: 2.5rem; font-weight: 700; color: #38bdf8; }
 .metric-label { font-size: 0.85rem; color: #9ca3af; margin-top: 4px; }
 .status-badge {
     display: inline-block;
@@ -71,7 +71,7 @@ section[data-testid="stSidebar"] { background-color: #1a1d27; }
         color: #111111 !important;
         break-inside: avoid;
     }
-    .metric-value { color: #3730a3 !important; }
+    .metric-value { color: #0369a1 !important; }
     .metric-label { color: #374151 !important; }
 
     .stPlotlyChart,

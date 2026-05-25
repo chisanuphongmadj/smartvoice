@@ -344,13 +344,29 @@ def recover_stale_processing(max_age_minutes: int) -> int:
     return cur.rowcount or 0
 
 
-def get_done_calls() -> list[dict]:
+def get_done_calls(limit: int | None = None, offset: int = 0) -> list[dict]:
+    """Return completed calls newest-first.
+
+    `limit=None` keeps the original behavior (return everything). Passing an int
+    caps the result for dashboards that need to stay responsive on large datasets.
+    """
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM calls WHERE status = 'done' ORDER BY created_at DESC"
-    ).fetchall()
+    sql = "SELECT * FROM calls WHERE status = 'done' ORDER BY created_at DESC"
+    params: tuple = ()
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params = (int(limit), int(offset))
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def count_done_calls() -> int:
+    """Return total number of completed calls (used for 'X of Y' indicators)."""
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) FROM calls WHERE status = 'done'").fetchone()[0]
+    conn.close()
+    return int(n or 0)
 
 
 # ─── Customers ────────────────────────────────────────────────────────────────
@@ -683,20 +699,79 @@ def get_calls_by_case(case_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_all_cases() -> list[dict]:
+def get_all_cases(
+    limit: int | None = None,
+    offset: int = 0,
+    status: str | None = None,
+    search: str | None = None,
+) -> list[dict]:
+    """Return cases newest-first.
+
+    Default behavior (no kwargs) is unchanged — returns every case. Optional
+    `limit`, `status`, and `search` let the dashboard stay responsive when the
+    cases table grows large (search matches subject, customer name, or phone).
+    """
+    where: list[str] = []
+    params: list = []
+    if status:
+        where.append("cs.status = ?")
+        params.append(status)
+    if search:
+        like = f"%{search.strip()}%"
+        where.append(
+            "(cs.subject LIKE ? OR c.first_name LIKE ? OR "
+            "c.last_name LIKE ? OR c.phone LIKE ?)"
+        )
+        params.extend([like, like, like, like])
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    sql = f"""
+        SELECT cs.*,
+               c.first_name, c.last_name, c.phone,
+               COUNT(cl.id) as call_count
+        FROM cases cs
+        LEFT JOIN customers c ON c.id = cs.customer_id
+        LEFT JOIN calls cl ON cl.case_id = cs.id
+        {where_sql}
+        GROUP BY cs.id
+        ORDER BY cs.updated_at DESC
+    """
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([int(limit), int(offset)])
+
     conn = get_connection()
-    rows = conn.execute(
-        """SELECT cs.*,
-                  c.first_name, c.last_name, c.phone,
-                  COUNT(cl.id) as call_count
-           FROM cases cs
-           LEFT JOIN customers c ON c.id = cs.customer_id
-           LEFT JOIN calls cl ON cl.case_id = cs.id
-           GROUP BY cs.id
-           ORDER BY cs.updated_at DESC"""
-    ).fetchall()
+    rows = conn.execute(sql, tuple(params)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def count_cases(status: str | None = None, search: str | None = None) -> int:
+    """Return number of cases matching optional status/search filters."""
+    where: list[str] = []
+    params: list = []
+    if status:
+        where.append("cs.status = ?")
+        params.append(status)
+    if search:
+        like = f"%{search.strip()}%"
+        where.append(
+            "(cs.subject LIKE ? OR c.first_name LIKE ? OR "
+            "c.last_name LIKE ? OR c.phone LIKE ?)"
+        )
+        params.extend([like, like, like, like])
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    conn = get_connection()
+    n = conn.execute(
+        f"""SELECT COUNT(DISTINCT cs.id)
+            FROM cases cs
+            LEFT JOIN customers c ON c.id = cs.customer_id
+            {where_sql}""",
+        tuple(params),
+    ).fetchone()[0]
+    conn.close()
+    return int(n or 0)
 
 
 def get_calls_by_customer(customer_id: int) -> list[dict]:

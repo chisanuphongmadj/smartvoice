@@ -103,6 +103,127 @@ class TestCaseCounts(DBTestCase):
         self.assertEqual(counts["closed"], 1)
 
 
+class TestGetDoneCallsPagination(DBTestCase):
+    """Regression: dashboard must be able to cap rows on large datasets without
+    breaking the no-arg behavior that other callers (and older code) rely on."""
+
+    def _seed_done_calls(self, n: int) -> list[int]:
+        ids = []
+        for i in range(n):
+            cid = db.insert_call(f"call_{i}.wav", f"hash_{i}", f"/fake_{i}.wav")
+            db.update_call_status(cid, "done")
+            ids.append(cid)
+        return ids
+
+    def test_no_arg_returns_all(self):
+        self._seed_done_calls(7)
+        self.assertEqual(len(db.get_done_calls()), 7)
+
+    def test_limit_caps_rows(self):
+        self._seed_done_calls(10)
+        self.assertEqual(len(db.get_done_calls(limit=3)), 3)
+
+    def test_limit_larger_than_dataset_is_safe(self):
+        self._seed_done_calls(2)
+        self.assertEqual(len(db.get_done_calls(limit=100)), 2)
+
+    def test_offset_skips_rows(self):
+        self._seed_done_calls(5)
+        page1 = db.get_done_calls(limit=2, offset=0)
+        page2 = db.get_done_calls(limit=2, offset=2)
+        # Pages should not overlap
+        self.assertEqual(len(page1), 2)
+        self.assertEqual(len(page2), 2)
+        self.assertNotEqual(page1[0]["id"], page2[0]["id"])
+
+    def test_only_done_status_returned(self):
+        # uploaded + processing must be excluded
+        db.insert_call("uploaded.wav", "h1", "/u.wav")
+        cid = db.insert_call("done.wav", "h2", "/d.wav")
+        db.update_call_status(cid, "done")
+        cid2 = db.insert_call("proc.wav", "h3", "/p.wav")
+        db.update_call_status(cid2, "processing")
+        rows = db.get_done_calls()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["filename"], "done.wav")
+
+    def test_count_done_calls(self):
+        self.assertEqual(db.count_done_calls(), 0)
+        self._seed_done_calls(4)
+        db.insert_call("uploaded.wav", "u1", "/u.wav")  # not done
+        self.assertEqual(db.count_done_calls(), 4)
+
+
+class TestGetAllCasesFilters(DBTestCase):
+    """Regression: Case Management dashboard must be filterable + paginated
+    for installs with thousands of cases. Default no-arg behavior is kept."""
+
+    def _seed(self):
+        c1 = db.insert_customer(first_name="สุภาพร", last_name="จันทร์แก้ว", phone="0800000001")
+        c2 = db.insert_customer(first_name="ธนวัฒน์", last_name="รักษาศิลป์", phone="0800000002")
+        # 3 open, 2 follow_up, 1 closed
+        db.create_case(c1, "แจ้งปัญหาที่นอน", status="open")
+        db.create_case(c1, "สอบถามจัดส่ง", status="open")
+        db.create_case(c2, "เปลี่ยนคืน", status="open")
+        db.create_case(c1, "ติดตามเคลม", status="follow_up")
+        db.create_case(c2, "นัดช่าง", status="follow_up")
+        db.create_case(c2, "ปิดเรื่องแล้ว", status="closed")
+
+    def test_no_arg_returns_all(self):
+        self._seed()
+        self.assertEqual(len(db.get_all_cases()), 6)
+
+    def test_status_filter(self):
+        self._seed()
+        self.assertEqual(len(db.get_all_cases(status="open")), 3)
+        self.assertEqual(len(db.get_all_cases(status="follow_up")), 2)
+        self.assertEqual(len(db.get_all_cases(status="closed")), 1)
+
+    def test_search_matches_subject(self):
+        self._seed()
+        rows = db.get_all_cases(search="แจ้งปัญหา")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("แจ้งปัญหา", rows[0]["subject"])
+
+    def test_search_matches_customer_name(self):
+        self._seed()
+        rows = db.get_all_cases(search="ธนวัฒน์")
+        self.assertEqual(len(rows), 3)  # 3 cases owned by ธนวัฒน์
+
+    def test_search_matches_phone(self):
+        self._seed()
+        rows = db.get_all_cases(search="0800000001")
+        self.assertEqual(len(rows), 3)  # 3 cases owned by 0800000001
+
+    def test_limit_offset_paginates(self):
+        self._seed()
+        page1 = db.get_all_cases(limit=2, offset=0)
+        page2 = db.get_all_cases(limit=2, offset=2)
+        self.assertEqual(len(page1), 2)
+        self.assertEqual(len(page2), 2)
+        self.assertNotEqual(page1[0]["id"], page2[0]["id"])
+
+    def test_combined_status_and_search(self):
+        self._seed()
+        rows = db.get_all_cases(status="open", search="ที่นอน")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "open")
+        self.assertIn("ที่นอน", rows[0]["subject"])
+
+    def test_count_cases_unfiltered(self):
+        self._seed()
+        self.assertEqual(db.count_cases(), 6)
+
+    def test_count_cases_with_status(self):
+        self._seed()
+        self.assertEqual(db.count_cases(status="open"), 3)
+        self.assertEqual(db.count_cases(status="closed"), 1)
+
+    def test_count_cases_with_search(self):
+        self._seed()
+        self.assertEqual(db.count_cases(search="สุภาพร"), 3)
+
+
 class TestOrphanCaseCleanup(DBTestCase):
     """Regression: deleting a call must also clean up its orphan case."""
 
