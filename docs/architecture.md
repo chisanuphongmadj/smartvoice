@@ -41,9 +41,9 @@
 | Admin | Upload, process, ค้นหา/กรอง (status + ทิศทางสาย Inbound/Outbound), load-limit picker สำหรับ scale, bulk delete, link ลูกค้า, จัดการ/รวมเคส |
 | Dashboard | Charts (รวม drill-down ประเภทความเสียหายภายใน "แจ้งปัญหาสินค้า"), anomaly, agent performance พร้อม QA evidence + filter ตามรหัส Agent, case summary, call summaries, load-limit picker |
 | Customers | ลูกค้า, warranty, เคส, สายที่เชื่อมไว้ |
-| Settings | preset Demo / Real AI, แก้ `.env`, readiness checks |
+| Settings | preset Demo / Real AI, แก้ `.env`, GPU auto-detect + ซ่อน `cuda` ถ้าไม่พบ, auto-apply combo เมื่อเปลี่ยน Whisper model, post-save validation, readiness checks |
 
-หน้า `Settings` ต้อง login ก่อน และจำกัด role เป็น `Admin` หรือ `Supervisor`
+หน้า `Settings` ต้อง login ก่อน และจำกัด role เป็น `Admin` หรือ `Supervisor` — และตั้งใจไม่ใช้ `st.form` เพราะ form widget ไม่ fire `on_change` ทำให้ feature auto-apply combo ใช้ไม่ได้
 
 ---
 
@@ -159,6 +159,31 @@ filename
 |------|------------------|----------|-------------|
 | Admin | `ทั้งหมด ≤ 200, ไม่งั้น 200 ล่าสุด` | 100 / 200 / 500 / 1,000 / 5,000 / ทั้งหมด | `count_calls_by_status()` (SQL `GROUP BY`) สำหรับ metric cards; `get_pending_call_ids()` lazy สำหรับ "Process All"; `get_processing_calls()` สำหรับ auto-refresh fragment |
 | Dashboard | `ทั้งหมด ≤ 1,000, ไม่งั้น 1,000 ล่าสุด` | 100 / 500 / 1,000 / 5,000 / ทั้งหมด | `get_done_calls(limit=N)` |
+
+## 7.2 Settings page reactive flow
+
+หน้า `Settings` ใช้ reactive widget แทน `st.form` เพื่อให้ on_change callback ของ Whisper model ทำงานทันที:
+
+```
+[Page load]
+  ├── ตรวจ GPU ด้วย gpu_available()
+  ├── สร้าง _DEVICE_OPTIONS = ["auto", "cpu"] + (["cuda"] ถ้ามี GPU)
+  ├── Seed session_state จาก .env (เฉพาะครั้งแรก)
+  └── Render widgets ทุกตัวด้วย key= + session_state binding
+
+[User เปลี่ยน Whisper model]
+  ├── on_change → _apply_model_recommendations()
+  │     ├── ดึง combo จาก recommended_combo_for_model(model, has_gpu)
+  │     ├── ถ้า device ไม่ใน _DEVICE_OPTIONS → fall back เป็น "auto"
+  │     └── เขียน session_state สำหรับ Backend / Device / Compute
+  └── Streamlit rerun → widget ทั้ง 3 re-render ตามค่าใหม่
+
+[User กด Save Settings]
+  ├── อ่านค่าจาก local variables (ที่ผูกกับ session_state ผ่าน key=)
+  ├── write_env(updates) → atomic write ลง .env
+  ├── แสดง success
+  └── รัน validate_whisper_combo() → render error/warning/info
+```
 
 ---
 

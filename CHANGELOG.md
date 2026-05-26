@@ -7,14 +7,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.2.0] — 2026-05-27 — Post-delivery feedback round 1
 
-### Added
+### Added — Dashboard / Analytics
 - `topic_detail` column on `calls` + controlled vocabulary in extraction prompt: `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ` (Omazz feedback: "แจ้งปัญหาสินค้า" หมวดเดียวกว้างเกินไป)
 - Drill-down chart "เจาะลึก: ประเภทความเสียหายภายใน 'แจ้งปัญหาสินค้า'" บน Dashboard ใต้ Topic / Intent Distribution
 - `ollama_client.normalize_topic_detail()` — clamp LLM output ให้อยู่ใน vocabulary 7 ค่า (keyword snap + fallback "อื่นๆ")
+- Agent dropdown filter + "Agent" column บน Dashboard → Agent Performance (`extract_agent_code_from_filename()`)
+
+### Added — Admin / Scale
 - Scale-friendly DB helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, และ `get_all_calls(limit=N)` — รองรับการใช้งานที่ 10K+ uploads
 - Load-limit picker บนหน้า Admin (`100 / 200 / 500 / 1,000 / 5,000 / ทั้งหมด`) และ Dashboard (`100 / 500 / 1,000 / 5,000 / ทั้งหมด`) — default แยกตาม use case
 - Inbound / Outbound radio filter บนหน้า Admin (`extract_direction_from_filename()`)
-- Agent dropdown filter + "Agent" column บน Dashboard → Agent Performance (`extract_agent_code_from_filename()`)
+
+### Added — Settings page
+- GPU auto-detection ด้วย `gpu_available()` / `gpu_device_name()` — แสดง banner ตามสถานะเครื่อง และซ่อน option `cuda` จาก Device dropdown ถ้าไม่พบ GPU
+- `validate_whisper_combo()` — ตรวจ compatibility ของ model / backend / device / compute หลัง Save (error / warning / info)
+- `recommended_combo_for_model()` — เมื่อผู้ใช้เลือก Whisper model ระบบจะปรับ Backend / Device / Compute เป็นค่าแนะนำให้อัตโนมัติ (auto-apply on change)
+- `help=` tooltip ทุก selectbox อธิบายข้อดี/ข้อเสียของแต่ละตัวเลือก
+
+### Added — Scripts
 - `scripts/backfill_topic_detail.py` — re-classify topic_detail ของ call เก่า ๆ ที่ topic="แจ้งปัญหาสินค้า" แต่ยังไม่มี detail (LLM-only, ไม่รัน STT)
 
 ### Changed
@@ -23,13 +33,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Auto-refresh fragment ของ Admin (รันทุก 3 วิ) เปลี่ยนจาก `get_all_calls()` ทั้งตาราง → `get_processing_calls()` เฉพาะ row ที่กำลัง process (โดยปกติ 0-1 row)
 - Dashboard default load: `ทั้งหมด ≤ 500 / ไม่งั้น 500 ล่าสุด` → `ทั้งหมด ≤ 1,000 / ไม่งั้น 1,000 ล่าสุด` (analytics ต้องการ signal มาก)
 - Admin default load: `ทั้งหมด ≤ 500 / ไม่งั้น 500 ล่าสุด` → `ทั้งหมด ≤ 200 / ไม่งั้น 200 ล่าสุด` (ops focus on recent)
+- หน้า Settings เอา `st.form` ออก — เปลี่ยนเป็น reactive widgets (key= + session_state) เพื่อให้ `on_change` callback ของ Whisper model selectbox ทำงานทันที (form widget ไม่ fire on_change จนกว่าจะ submit)
+- ปุ่ม Save Settings เปลี่ยนเป็น `st.button` ปกติ พฤติกรรมเหมือนเดิม (บันทึก `.env` ครั้งเดียวเมื่อกด)
 
 ### Database
 - `_migrate()` เพิ่ม column `topic_detail TEXT` (NULL สำหรับ row เก่า — ไม่ break migration)
 - `docs/database_design.md` อัปเดต ER diagram + data dictionary
 
+### Docs
+- `docs/user_manual.md` เขียนใหม่ฉบับเต็ม (17 sections, ~1,200 บรรทัด) สำหรับใช้เป็นรายงานส่ง Omazz
+- `docs/architecture.md`, `CLAUDE.md`, `AGENTS.md`, `README.md`, `docs/OMAZZ_RELEASE_CHECKLIST.md` อัปเดตให้ตรงกับฟีเจอร์ใหม่ทั้งหมด
+
 ### Tests
-- Test baseline ปัจจุบัน: `190 passed` (เดิม 145) — เพิ่ม regression สำหรับ topic_detail vocabulary, normalize_topic_detail, scale-friendly helpers, filename direction/agent extraction
+- Test baseline ปัจจุบัน: `209 passed` (เดิม 145) — เพิ่ม regression สำหรับ:
+  - topic_detail vocabulary + normalize_topic_detail (8 tests)
+  - scale-friendly DB helpers + topic_detail persistence (8 tests)
+  - filename direction/agent extraction (12 tests)
+  - Whisper combo validator (9 tests)
+  - recommended_combo_for_model (6 tests)
 
 ---
 

@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 190 tests, must pass 100% before every commit.
+**Current test baseline:** 209 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -50,6 +50,7 @@ ollama serve
 | `prompts.py` | All LLM prompt templates (~54 KB) |
 | `ollama_client.py` | LLM client + JSON extraction; 4 separate analysis calls. Includes `normalize_topic_detail()` for the product-issue drill-down vocabulary |
 | `file_manager.py` | Audio upload + SHA-256 deduplication. Filename helpers: `extract_phone_from_filename()`, `extract_direction_from_filename()` (Inbound/Outbound), `extract_agent_code_from_filename()` |
+| `env_settings.py` | `.env` read/write + UI helpers: `gpu_available()`, `gpu_device_name()`, `validate_whisper_combo()` (model/backend/device/compute compatibility), `recommended_combo_for_model()` (auto-apply on model change) |
 | `ui_helpers.py` | Shared CSS, badges, processing launchers |
 | `auth.py` | Streamlit login |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
@@ -151,6 +152,17 @@ Three pieces of metadata are derived from the CDR filename pattern `YYYYMMDDHHMM
 - **Agent extension** — `extract_agent_code_from_filename()` → powers the Agent dropdown filter on the Dashboard Agent Performance section. Returns the short numeric segment (2-5 digits) that isn't the 14-digit timestamp or a 10-digit Thai phone.
 
 No DB migration needed for direction/agent — derive at filter-time.
+
+## Settings page behavior
+
+`pages/4_Settings.py` is intentionally NOT wrapped in `st.form` because Streamlit form widgets don't fire `on_change` callbacks until form submit. The page uses reactive widgets (each with `key=`) + a single `st.button("Save Settings")` to commit all values together.
+
+Key behaviors:
+- **GPU detection** at page load via `gpu_available()` — hides `cuda` from Device dropdown when no GPU is present, so users can't save a combo that will crash later
+- **Auto-apply recommended combo on model change** — the Whisper model selectbox's `on_change=_apply_model_recommendations` callback writes `recommended_combo_for_model()` output to session_state for Backend/Device/Compute. User can still adjust afterwards.
+- **Post-save validation** — `validate_whisper_combo()` runs after save and renders `error` / `warning` / `info` messages so users see actionable feedback before the next `process_call()` would otherwise crash.
+
+`_MODEL_RECOMMENDED_COMBO` table in `env_settings.py` maps each known model to its preferred `(backend, device, compute)`. Adding a new model to the Settings dropdown should also add an entry here (otherwise it falls through with no auto-apply).
 
 ## Known Pitfalls
 

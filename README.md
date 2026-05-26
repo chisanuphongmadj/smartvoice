@@ -22,7 +22,8 @@ AI-powered Call Center Analytics สำหรับสายภาษาไท�
 - จัดกลุ่มเคสอัตโนมัติด้วย recency short-circuit ก่อนใช้ LLM match
 - Dashboard + Admin scale-friendly สำหรับ 10K+ ไฟล์ (load-limit picker, SQL-side counts), drill-down chart สำหรับประเภทความเสียหายภายใน "แจ้งปัญหาสินค้า"
 - Filter ตามทิศทางสาย (Inbound/Outbound) บนหน้า Admin และตามรหัส Agent ใน Agent Performance
-- มี customer/warranty view, case management, case merge, Settings, login, และ deployment readiness checks
+- Settings page อัจฉริยะ — auto-detect GPU + ซ่อน `cuda` ถ้าไม่พบ, auto-apply Backend/Device/Compute ที่แนะนำเมื่อเปลี่ยน Whisper model, validate combo compatibility ก่อน save
+- มี customer/warranty view, case management, case merge, login, และ deployment readiness checks
 
 ## Project Structure
 
@@ -167,4 +168,4 @@ Audio (.wav/.mp3)
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-ผลล่าสุดที่ยืนยันแล้ว: `190 passed` (ทดสอบเมื่อ 2026-05-27)
+ผลล่าสุดที่ยืนยันแล้ว: `209 passed` (ทดสอบเมื่อ 2026-05-27)

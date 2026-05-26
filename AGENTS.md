@@ -41,7 +41,7 @@ run.bat                 # Windows
 ./run.sh                # Linux/macOS
 ```
 
-**Test baseline ล่าสุด:** 190 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
+**Test baseline ล่าสุด:** 209 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
 
 ---
 
@@ -221,6 +221,21 @@ Filename รูปแบบ `YYYYMMDDHHMMSS-CALLID.NNN-{AGENT|PHONE}-{PHONE|AGEN
 - `scripts/backfill_topic_detail.py` — re-classify `topic_detail` ของสายเก่าที่ `topic="แจ้งปัญหาสินค้า"` แต่ยังไม่มี detail (LLM-only, ไม่รัน STT ใหม่)
 
 ทั้งคู่มี `--apply` flag (default = dry-run)
+
+## 6.7 Settings page (`pages/4_Settings.py`)
+
+**ตั้งใจไม่ใช้ `st.form`** เพราะ form widget ไม่ fire `on_change` จนกว่าจะ submit — ทำให้ feature "auto-apply combo on model change" ใช้ไม่ได้ใน form
+
+โครงสร้างปัจจุบัน:
+- Widget ทุกตัวมี `key=` + session_state seeded จาก `.env`
+- Whisper model selectbox มี `on_change=_apply_model_recommendations` → ปรับ Backend/Device/Compute ทันที
+- ปุ่ม Save เป็น `st.button` ปกติ (ไม่ใช่ `form_submit_button`) — บันทึก `.env` ครั้งเดียวเมื่อกด
+
+Helpers ใน `env_settings.py`:
+- `gpu_available()` / `gpu_device_name()` — ตรวจ CUDA, safe ถ้า torch ไม่มี
+- `validate_whisper_combo(model, backend, device, compute, has_gpu)` → list[(severity, message)]
+- `recommended_combo_for_model(model, has_gpu=None)` → tuple(backend, device, compute) | None
+- `_MODEL_RECOMMENDED_COMBO` — table mapping model → preferred combo (เพิ่ม model ใหม่ใน dropdown ต้องเพิ่มใน table นี้ด้วย)
 
 ---
 

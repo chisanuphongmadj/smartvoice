@@ -16,7 +16,7 @@ Use this before sending SmartVoice to Omazz or running a live demo.
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-Expected current baseline: `190 passed` as of 2026-05-27 (warnings about `.pytest_cache` permissions are non-blocking if all tests pass; if you hit `PermissionError` on the pytest tmp dir, pass `--basetemp="$env:TEMP\pytest-clean"`).
+Expected current baseline: `209 passed` as of 2026-05-27 (warnings about `.pytest_cache` permissions are non-blocking if all tests pass; if you hit `PermissionError` on the pytest tmp dir, pass `--basetemp="$env:TEMP\pytest-clean"`).
 
 - Open Home and verify `Deployment readiness`.
 - Create demo users with hashed passwords:
@@ -72,7 +72,11 @@ Recommended demo flow:
 8. Confirm Next Action rows use case-specific content and do not repeat fake prompt examples such as fixed amounts, product codes, or phone numbers.
 9. Show Admin's Inbound/Outbound filter and Dashboard's Agent filter on Agent Performance.
 10. Open Customers for warranty history and linked call context.
-11. Open Settings briefly to show Demo / Real AI switching.
+11. Open Settings briefly to show:
+    - Demo / Real AI switching
+    - GPU auto-detection banner (🚀 if GPU present, ⚠️ if not — `cuda` hidden from Device dropdown)
+    - Auto-apply combo: switch Whisper model → Backend/Device/Compute update immediately to the recommended pairing
+    - Post-save validation: error/warning/info messages if user picks an incompatible combo
 
 ## Privacy notes
 
