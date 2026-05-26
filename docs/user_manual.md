@@ -1,7 +1,7 @@
 # SmartVoice — คู่มือการใช้งาน
 
 > **สำหรับ:** ผู้ดูแล Call Center, QA, Supervisor
-> **อัปเดตล่าสุด:** 20 พฤษภาคม 2569
+> **อัปเดตล่าสุด:** 27 พฤษภาคม 2569
 
 ---
 
@@ -95,8 +95,10 @@ uploaded → processing → done
 ## ฟีเจอร์หน้า Admin
 
 - ค้นหาจากชื่อไฟล์, เบอร์, หรือผู้อัปโหลด
-- กรองตามสถานะ
+- กรองตามสถานะ (Pending / Processing / Done / Error)
+- กรองตามทิศทางสาย (📥 Inbound / 📤 Outbound) — ระบบดูจาก suffix ของชื่อไฟล์
 - เรียงใหม่→เก่า / เก่า→ใหม่ / ตามสถานะ
+- **ขอบเขตการโหลด** — เลือกจำนวนสายที่จะโหลดเข้ามาแสดง (100 / 200 / 500 / 1,000 / 5,000 / ทั้งหมด) สำหรับ DB ขนาดใหญ่ ตัวเลข Pending/Processing/Done/Errors ด้านบนยังแสดงตัวเลขรวมของทั้งระบบเสมอ
 - เลือกหลายไฟล์เพื่อลบพร้อมกัน
 - pagination แบบ `แสดงเพิ่ม`
 - ล้าง orphan cases
@@ -112,7 +114,7 @@ Dashboard แสดง:
 
 - KPI จำนวนสายและ sentiment
 - Sentiment distribution
-- Topic / intent distribution
+- Topic / intent distribution พร้อม **drill-down** เจาะลึกประเภทความเสียหายภายในหมวด "แจ้งปัญหาสินค้า" (ผ้าขาด/เตียงหัก/สปริงยุบ/เปื้อน-รอย/ความชื้น/ขนาดผิด/อื่นๆ)
 - Issue keywords
 - Brand mentions
 - Platform/channel mentions
@@ -123,12 +125,21 @@ Dashboard แสดง:
 - Case management summary
 - ตารางสรุปทุกสาย
 
+ด้านบนของ Dashboard มี **Filter panel** ที่ปรับ scope ได้ทั้งหน้า:
+
+- Date range
+- Intent / Topic
+- Sentiment
+- **จำนวนสายที่โหลด** — ระบบเริ่มต้นที่ "1,000 สายล่าสุด" สำหรับ DB ใหญ่ (ถ้าน้อยกว่า 1,000 จะโหลดทั้งหมด) ปรับเพิ่ม/ลดได้
+
 Agent performance จะรวมหลายสายที่อยู่ในเคสเดียวกันเป็น 1 แถว:
 
 - คะแนน = ค่าเฉลี่ยในเคส
 - Score = Politeness + Problem Solving
 - Next Action = จากสายล่าสุด และระบบจะกรองข้อความที่ดูเหมือน copy ตัวอย่างจาก prompt ออก
 - ถ้าเคส `closed` จะไม่แสดง next action ค้าง
+- **คอลัมน์ Agent** — แสดงรหัสพนักงาน (เช่น 102, 104) ที่ดูจาก suffix ของชื่อไฟล์ ถ้าเคสมีหลาย Agent จะรวมเช่น `102, 104`
+- **Filter Agent** — dropdown ด้านบนตารางใช้เลือกดูเฉพาะ Agent คนเดียวได้
 
 ---
 

@@ -50,7 +50,8 @@ class TestSchema(DBTestCase):
         # Columns added via _migrate
         for expected in ("case_id", "customer_phone", "sentiment_reason",
                           "anomaly_severity", "processing_step",
-                          "uploaded_by", "uploaded_by_role"):
+                          "uploaded_by", "uploaded_by_role",
+                          "topic_detail"):
             self.assertIn(expected, cols)
 
     def test_foreign_keys_are_enabled(self):
@@ -80,6 +81,87 @@ class TestIdempotentInserts(DBTestCase):
         wid1 = db.insert_warranty(registration_no="REG001", customer_id=cid, brand="Omazz")
         wid2 = db.insert_warranty(registration_no="REG001", customer_id=cid, brand="Other")
         self.assertEqual(wid1, wid2)
+
+
+class TestScaleFriendlyHelpers(DBTestCase):
+    """Admin page must stay responsive at 10K+ uploads — these helpers replace
+    a full-table scan with SQL-side counts + scoped fetches."""
+
+    def _seed(self):
+        # 3 uploaded, 1 processing, 2 done, 1 error
+        for i in range(3):
+            db.insert_call(f"u_{i}.wav", f"hU{i}", f"/u_{i}.wav")
+        cid = db.insert_call("p.wav", "hP", "/p.wav")
+        db.update_call_status(cid, "processing")
+        for i in range(2):
+            cid = db.insert_call(f"d_{i}.wav", f"hD{i}", f"/d_{i}.wav")
+            db.update_call_status(cid, "done")
+        cid = db.insert_call("e.wav", "hE", "/e.wav")
+        db.update_call_status(cid, "error", error_msg="boom")
+
+    def test_count_calls_by_status_returns_all_buckets(self):
+        self._seed()
+        counts = db.count_calls_by_status()
+        self.assertEqual(counts["uploaded"], 3)
+        self.assertEqual(counts["processing"], 1)
+        self.assertEqual(counts["done"], 2)
+        self.assertEqual(counts["error"], 1)
+        self.assertEqual(counts["total"], 7)
+
+    def test_count_calls_empty_database(self):
+        counts = db.count_calls_by_status()
+        self.assertEqual(counts, {"uploaded": 0, "processing": 0, "done": 0,
+                                  "error": 0, "total": 0})
+
+    def test_get_all_calls_limit_caps_rows(self):
+        self._seed()
+        self.assertEqual(len(db.get_all_calls(limit=3)), 3)
+
+    def test_get_all_calls_no_limit_returns_everything(self):
+        # Backward-compat: callers that don't pass limit still get the full list
+        self._seed()
+        self.assertEqual(len(db.get_all_calls()), 7)
+
+    def test_get_pending_call_ids_returns_only_uploaded(self):
+        self._seed()
+        ids = db.get_pending_call_ids()
+        self.assertEqual(len(ids), 3)
+        # All returned ids must really be 'uploaded' status
+        for cid in ids:
+            self.assertEqual(db.get_call_by_id(cid)["status"], "uploaded")
+
+    def test_get_processing_calls_returns_only_processing(self):
+        self._seed()
+        rows = db.get_processing_calls()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "processing")
+
+
+class TestUpdateCallResultsTopicDetail(DBTestCase):
+    """topic_detail must persist (drill-down for "แจ้งปัญหาสินค้า" — Omazz request)."""
+
+    def _seed(self) -> int:
+        cid = db.insert_call("c.wav", "hX", "/c.wav")
+        return cid
+
+    def test_persists_topic_detail(self):
+        cid = self._seed()
+        db.update_call_results(
+            call_id=cid, transcript="t", summary="s", sentiment="neutral",
+            topic="แจ้งปัญหาสินค้า", topic_detail="ผ้าขาด/ผ้าหุ้มชำรุด",
+        )
+        row = db.get_call_by_id(cid)
+        self.assertEqual(row["topic_detail"], "ผ้าขาด/ผ้าหุ้มชำรุด")
+        self.assertEqual(row["status"], "done")
+
+    def test_default_topic_detail_is_empty(self):
+        cid = self._seed()
+        db.update_call_results(
+            call_id=cid, transcript="t", summary="s", sentiment="neutral",
+            topic="สอบถามข้อมูลสินค้า",
+        )
+        row = db.get_call_by_id(cid)
+        self.assertEqual(row["topic_detail"] or "", "")
 
 
 class TestCaseCounts(DBTestCase):

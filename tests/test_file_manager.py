@@ -134,5 +134,105 @@ class TestPhoneExtraction(unittest.TestCase):
         )
 
 
+class TestDirectionExtraction(unittest.TestCase):
+    """Direction tag is read from the CDR filename suffix — used by the Admin
+    page filter (Omazz request: separate Inbound vs Outbound views)."""
+
+    def test_inbound_filename(self):
+        self.assertEqual(
+            file_manager.extract_direction_from_filename(
+                "20251225134209-1766644826-0631451550-104-Inbound.wav"
+            ),
+            "inbound",
+        )
+
+    def test_outbound_filename(self):
+        self.assertEqual(
+            file_manager.extract_direction_from_filename(
+                "20251104173706-1762252614-0819979336-Outbound.wav"
+            ),
+            "outbound",
+        )
+
+    def test_case_insensitive(self):
+        self.assertEqual(
+            file_manager.extract_direction_from_filename("call-INBOUND.wav"),
+            "inbound",
+        )
+        self.assertEqual(
+            file_manager.extract_direction_from_filename("call-outbound.MP3"),
+            "outbound",
+        )
+
+    def test_unknown_when_no_tag(self):
+        self.assertIsNone(
+            file_manager.extract_direction_from_filename("random_recording.wav")
+        )
+
+    def test_empty_filename(self):
+        self.assertIsNone(file_manager.extract_direction_from_filename(""))
+        self.assertIsNone(file_manager.extract_direction_from_filename(None))
+
+
+class TestAgentCodeExtraction(unittest.TestCase):
+    """Agent extension is encoded in the CDR filename — used by the Dashboard
+    Agent Performance filter (Omazz request: separate agents by code)."""
+
+    def test_outbound_layout(self):
+        # Outbound: TIMESTAMP-CALLID.NNN-AGENT-PHONE-Outbound.wav
+        self.assertEqual(
+            file_manager.extract_agent_code_from_filename(
+                "20251104173706-1762252614.105999-104-0819979336-Outbound.wav"
+            ),
+            "104",
+        )
+
+    def test_inbound_layout(self):
+        # Inbound: TIMESTAMP-CALLID.NNN-PHONE-AGENT-Inbound.wav
+        self.assertEqual(
+            file_manager.extract_agent_code_from_filename(
+                "20251225134209-1766644826.135925-0631451550-104-Inbound.wav"
+            ),
+            "104",
+        )
+
+    def test_different_agent_codes(self):
+        self.assertEqual(
+            file_manager.extract_agent_code_from_filename(
+                "20251225134109-1766644797.135924-0653965264-102-Inbound.wav"
+            ),
+            "102",
+        )
+
+    def test_ignores_timestamp_prefix(self):
+        # 14-digit timestamp must not be picked as an agent code
+        self.assertNotEqual(
+            file_manager.extract_agent_code_from_filename(
+                "20251104173706-1762252614.105999-104-0819979336-Outbound.wav"
+            ),
+            "20251104173706",
+        )
+
+    def test_ignores_thai_phone(self):
+        # 10-digit phone starting with 0 must not be picked
+        self.assertNotEqual(
+            file_manager.extract_agent_code_from_filename(
+                "20251104173706-1762252614.105999-104-0819979336-Outbound.wav"
+            ),
+            "0819979336",
+        )
+
+    def test_unknown_when_no_short_code(self):
+        self.assertIsNone(
+            file_manager.extract_agent_code_from_filename(
+                "20251104173706-0819979336-Outbound.wav"
+            )
+        )
+
+    def test_empty_or_none(self):
+        self.assertIsNone(file_manager.extract_agent_code_from_filename(""))
+        self.assertIsNone(file_manager.extract_agent_code_from_filename(None))
+
+
 if __name__ == "__main__":
     unittest.main()

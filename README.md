@@ -16,11 +16,13 @@ AI-powered Call Center Analytics สำหรับสายภาษาไท�
 ## Current Capabilities
 
 - Upload `.wav` / `.mp3`, ตรวจ magic bytes, จำกัดขนาดไฟล์ 100 MB, และ deduplicate ด้วย SHA-256
-- ดึงเบอร์โทรจากชื่อไฟล์, เชื่อมลูกค้า/รับประกันอัตโนมัติ, และบันทึกผู้ upload เพื่อ audit
+- ดึงเบอร์โทร, ทิศทางสาย (Inbound/Outbound), และรหัส Agent จากชื่อไฟล์อัตโนมัติ; เชื่อมลูกค้า/รับประกันอัตโนมัติ และบันทึกผู้ upload เพื่อ audit
 - ถอดเสียง + diarization + speaker correction แบบหลายชั้น โดยผสม LLM กับ heuristic rules ภาษาไทย
-- วิเคราะห์ 4 ด้านแยกกัน: summary/topic, sentiment, agent QA พร้อมหลักฐานคะแนน, anomaly
+- วิเคราะห์ 4 ด้านแยกกัน: summary/topic/topic_detail, sentiment, agent QA พร้อมหลักฐานคะแนน, anomaly
 - จัดกลุ่มเคสอัตโนมัติด้วย recency short-circuit ก่อนใช้ LLM match
-- มี Dashboard, customer/warranty view, case management, case merge, Settings, login, และ deployment readiness checks
+- Dashboard + Admin scale-friendly สำหรับ 10K+ ไฟล์ (load-limit picker, SQL-side counts), drill-down chart สำหรับประเภทความเสียหายภายใน "แจ้งปัญหาสินค้า"
+- Filter ตามทิศทางสาย (Inbound/Outbound) บนหน้า Admin และตามรหัส Agent ใน Agent Performance
+- มี customer/warranty view, case management, case merge, Settings, login, และ deployment readiness checks
 
 ## Project Structure
 
@@ -51,6 +53,7 @@ smartvoice/
 │       ├── orchestrator.py        # Audio → STT → diarization
 │       └── transcribe.py          # `transformers` + `faster-whisper`
 ├── scripts/
+│   ├── backfill_topic_detail.py     # Re-classify topic_detail for legacy calls
 │   ├── extract_pdf.py
 │   ├── generate_er_diagram.py
 │   ├── make_password_hash.py
@@ -145,6 +148,7 @@ Audio (.wav/.mp3)
 |-------|-------------|
 | `summary` | สรุปบทสนทนา |
 | `topic` | หัวข้อหลักที่ลูกค้าติดต่อ |
+| `topic_detail` | ประเภทความเสียหายเฉพาะ — กรอกเมื่อ `topic="แจ้งปัญหาสินค้า"` เท่านั้น (vocabulary: `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ`) |
 | `sentiment` | `positive` / `neutral` / `negative` |
 | `sentiment_reason` | เหตุผลประกอบ sentiment |
 | `agent_performance` | `politeness`, `politeness_evidence`, `problem_solving`, `problem_solving_evidence`, `overall_score`, `next_action`, `next_action_owner` |
@@ -163,4 +167,4 @@ Audio (.wav/.mp3)
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-ผลล่าสุดที่ยืนยันแล้ว: `145 passed` (ทดสอบเมื่อ 2026-05-20)
+ผลล่าสุดที่ยืนยันแล้ว: `190 passed` (ทดสอบเมื่อ 2026-05-27)

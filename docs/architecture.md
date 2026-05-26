@@ -38,8 +38,8 @@
 | หน้า | หน้าที่ |
 |------|---------|
 | Home | KPI เร็ว + `Deployment readiness` |
-| Admin | Upload, process, ค้นหา/กรอง, bulk delete, link ลูกค้า, จัดการ/รวมเคส |
-| Dashboard | Charts, anomaly, agent performance พร้อม QA evidence, case summary, call summaries |
+| Admin | Upload, process, ค้นหา/กรอง (status + ทิศทางสาย Inbound/Outbound), load-limit picker สำหรับ scale, bulk delete, link ลูกค้า, จัดการ/รวมเคส |
+| Dashboard | Charts (รวม drill-down ประเภทความเสียหายภายใน "แจ้งปัญหาสินค้า"), anomaly, agent performance พร้อม QA evidence + filter ตามรหัส Agent, case summary, call summaries, load-limit picker |
 | Customers | ลูกค้า, warranty, เคส, สายที่เชื่อมไว้ |
 | Settings | preset Demo / Real AI, แก้ `.env`, readiness checks |
 
@@ -81,6 +81,8 @@ Upload audio
 
 Agent QA score ถูก normalize ใน `ollama_client.evaluate_agent_qa()`: `politeness` และ `problem_solving` ถูก clamp ให้อยู่ช่วง 1-5, เก็บ evidence แยก, และ `overall_score` ถูกคำนวณจากคะแนนย่อยใน backend เพื่อลดผลเพี้ยนจาก LLM
 
+Extraction call (`extract_summary_and_topics()`) ยังเก็บ `topic_detail` เพิ่ม — controlled vocabulary 7 ค่าสำหรับประเภทความเสียหาย (กรอกเมื่อ `topic="แจ้งปัญหาสินค้า"`) ผ่าน `normalize_topic_detail()` clamp ให้อยู่ใน enum ก่อนเขียน DB
+
 ---
 
 ## 4. Speaker Correction Strategy
@@ -107,14 +109,15 @@ Pipeline ไม่พึ่ง LLM อย่างเดียว เพรา�
 
 ---
 
-## 5. Auto-Linking ตอน Upload
+## 5. Auto-Linking ตอน Upload + Filename-derived filters
+
+CDR filename รูปแบบ `YYYYMMDDHHMMSS-CALLID.NNN-{AGENT|PHONE}-{PHONE|AGENT}-{Inbound|Outbound}.wav` มี metadata ที่ใช้ทั้งตอน upload และตอนกรองภายหลัง:
 
 ```text
 filename
-  → extract_phone_from_filename()
-  → get_customer_by_phone()
-      → found: create `call_customer_links` with `matched_by='auto_phone'`
-      → not found: keep phone on `calls.customer_phone`
+  → extract_phone_from_filename()         → auto-link ลูกค้า/warranty ตอน upload
+  → extract_direction_from_filename()     → ใช้ตอนกรอง Inbound/Outbound บน Admin (runtime, ไม่เก็บ DB)
+  → extract_agent_code_from_filename()    → ใช้ตอนกรองตามรหัส Agent บน Dashboard (runtime, ไม่เก็บ DB)
 ```
 
 ถ้าพบลูกค้า ระบบจะเลือก warranty ล่าสุดของคนนั้นมาเชื่อมให้ด้วย
@@ -140,13 +143,22 @@ filename
 - `launch_processing(call_id)` ใช้ 1 daemon thread ต่อสาย
 - `launch_processing_queue(ids)` ใช้ daemon thread เดียวแล้วไล่ทีละสาย
 - `_processing_lock` และ `_queue_lock` ป้องกันงานซ้ำ
-- `@st.fragment(run_every=3)` ใช้ refresh สถานะบนหน้า Admin
+- `@st.fragment(run_every=3)` ใช้ refresh สถานะบนหน้า Admin (query เฉพาะ `db.get_processing_calls()` 0-1 row ต่อ tick เพื่อให้เบาที่ 10K+ uploads)
 - ถ้าแอปถูกปิดกลางทาง ระบบจะ reset สายที่ค้างเกิน `PROCESSING_STALE_MINUTES` กลับเป็น `uploaded` ตอนเปิดหน้าใหม่
 
 ข้อจำกัดที่ยังมี:
 
 - queue ยังไม่ persistent ข้าม process restart
 - ระบบยังเป็น local single-node app
+
+## 7.1 Scale-friendly Admin / Dashboard
+
+ทั้งสองหน้า cap จำนวน row ที่โหลดเข้ามา render เพื่อให้ใช้ได้กับ DB ขนาด 10K+ ไฟล์:
+
+| หน้า | Default เริ่มต้น | ตัวเลือก | กลไกฝั่ง DB |
+|------|------------------|----------|-------------|
+| Admin | `ทั้งหมด ≤ 200, ไม่งั้น 200 ล่าสุด` | 100 / 200 / 500 / 1,000 / 5,000 / ทั้งหมด | `count_calls_by_status()` (SQL `GROUP BY`) สำหรับ metric cards; `get_pending_call_ids()` lazy สำหรับ "Process All"; `get_processing_calls()` สำหรับ auto-refresh fragment |
+| Dashboard | `ทั้งหมด ≤ 1,000, ไม่งั้น 1,000 ล่าสุด` | 100 / 500 / 1,000 / 5,000 / ทั้งหมด | `get_done_calls(limit=N)` |
 
 ---
 
@@ -175,9 +187,11 @@ smartvoice/
 │   ├── ui_helpers.py
 │   └── stt/
 ├── scripts/
+│   ├── backfill_topic_detail.py    # Re-classify topic_detail for legacy product-issue calls
 │   ├── extract_pdf.py
 │   ├── generate_er_diagram.py
 │   ├── make_password_hash.py
+│   ├── scrub_existing_next_actions.py
 │   └── seed_mock_data.py
 ├── tests/
 ├── docs/

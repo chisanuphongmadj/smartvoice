@@ -6,6 +6,7 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Admin", page_icon="📤", layout="wide")
 
 from smartvoice import db, file_manager
+from smartvoice.file_manager import extract_direction_from_filename
 from smartvoice.preflight import get_ollama_readiness, ollama_setup_lines
 from smartvoice.ui_helpers import (
     get_current_user,
@@ -92,7 +93,10 @@ st.divider()
 # Processing section
 st.subheader("2. Process Calls")
 
-calls = db.get_all_calls()
+# ── Scale-friendly counts: SQL aggregate so it stays fast at 10K+ rows ─────
+# (the Admin list below is capped to "latest N" via a user picker — these
+#  counts always reflect the WHOLE table, not the capped subset)
+_counts = db.count_calls_by_status()
 ollama_ready, ollama_detail = get_ollama_readiness()
 processing_blocked = not ollama_ready
 
@@ -105,30 +109,15 @@ if processing_blocked:
     for line in ollama_setup_lines():
         st.markdown(line)
 
-# Clean up `just_launched` — remove ids whose DB status has moved past 'processing'.
-# (Without this, a call keeps showing PROCESSING forever because the session-state
-# override stays even after the pipeline finishes.)
-if "just_launched" in st.session_state:
-    _active_db_statuses = {c["id"]: c["status"] for c in calls}
-    st.session_state.just_launched = {
-        cid for cid in st.session_state.just_launched
-        if _active_db_statuses.get(cid) in ("uploaded", "processing")
-    }
-
-pending    = [c for c in calls if c["status"] == "uploaded"]
-processing = [c for c in calls if c["status"] == "processing"]
-done       = [c for c in calls if c["status"] == "done"]
-errored    = [c for c in calls if c["status"] == "error"]
-
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.markdown(metric_card(len(pending), "Pending"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["uploaded"], "Pending"), unsafe_allow_html=True)
 with col2:
-    st.markdown(metric_card(len(processing), "Processing"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["processing"], "Processing"), unsafe_allow_html=True)
 with col3:
-    st.markdown(metric_card(len(done), "Done"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["done"], "Done"), unsafe_allow_html=True)
 with col4:
-    st.markdown(metric_card(len(errored), "Errors"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["error"], "Errors"), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -136,16 +125,18 @@ col_a, col_b = st.columns([1, 3])
 with col_a:
     process_all_btn = st.button(
         "▶ Process All Pending",
-        disabled=len(pending) == 0 or processing_blocked,
+        disabled=_counts["uploaded"] == 0 or processing_blocked,
         use_container_width=True,
         type="primary",
     )
 with col_b:
-    if len(pending) == 0:
+    if _counts["uploaded"] == 0:
         st.info("No pending calls to process.")
 
-if process_all_btn and pending:
-    queued = launch_processing_queue([c["id"] for c in pending])
+if process_all_btn and _counts["uploaded"] > 0:
+    # Lazy fetch — only the IDs we need, and only when the button is clicked
+    pending_ids = db.get_pending_call_ids()
+    queued = launch_processing_queue(pending_ids)
     if "just_launched" not in st.session_state:
         st.session_state.just_launched = set()
     st.session_state.just_launched.update(queued or [])
@@ -171,10 +162,56 @@ st.divider()
 
 # Individual call actions
 st.subheader("3. Individual Call Actions")
-if not calls:
+if _counts["total"] == 0:
     st.caption("No calls uploaded yet.")
 else:
-    refresh_calls = calls
+    # ── Load-limit picker (ops-focused: usually browsing recent uploads) ──
+    # บริษัทมีไฟล์เสียงเป็นหมื่นๆ ไฟล์ — โหลดทั้งหมดทุกครั้งจะหน่วงระบบ
+    _ADMIN_LIMIT_OPTIONS = {
+        "100 สายล่าสุด": 100,
+        "200 สายล่าสุด": 200,
+        "500 สายล่าสุด": 500,
+        "1,000 สายล่าสุด": 1000,
+        "5,000 สายล่าสุด": 5000,
+        "ทั้งหมด (อาจช้าเมื่อข้อมูลเยอะ)": None,
+    }
+    # Default — ops users mostly look at recent uploads, so a tighter default
+    # keeps the page snappy. 200 latest ≈ 10 pages of pagination (PAGE_SIZE=20),
+    # enough for a normal browsing session.
+    _default_admin_limit = (
+        "ทั้งหมด (อาจช้าเมื่อข้อมูลเยอะ)" if _counts["total"] <= 200 else "200 สายล่าสุด"
+    )
+    if "_admin_load_limit" not in st.session_state:
+        st.session_state["_admin_load_limit"] = _default_admin_limit
+
+    lim_col1, lim_col2 = st.columns([1, 3])
+    with lim_col1:
+        st.selectbox(
+            "ขอบเขตการโหลด",
+            list(_ADMIN_LIMIT_OPTIONS.keys()),
+            key="_admin_load_limit",
+            help="จำกัดจำนวนสายที่โหลดเข้ามาแสดง เพื่อให้หน้านี้เปิดเร็วเมื่อมีไฟล์เยอะมาก",
+        )
+    _admin_limit = _ADMIN_LIMIT_OPTIONS.get(st.session_state["_admin_load_limit"])
+    with lim_col2:
+        if _admin_limit is not None and _counts["total"] > _admin_limit:
+            st.caption(
+                f"โหลด {_admin_limit:,} สายล่าสุดจากทั้งหมด {_counts['total']:,} สาย"
+                "  •  ถ้าต้องค้นสายเก่ากว่านี้ ให้ขยายขอบเขตด้านซ้าย"
+            )
+
+    refresh_calls = db.get_all_calls(limit=_admin_limit)
+
+    # Clean up `just_launched` — remove ids whose status has moved past
+    # 'processing'. Use the same loaded subset (newest calls are the most
+    # likely candidates; older just_launched ids are rare and will self-clear
+    # on the next refresh when their status changes).
+    if "just_launched" in st.session_state:
+        _active_db_statuses = {c["id"]: c["status"] for c in refresh_calls}
+        st.session_state.just_launched = {
+            cid for cid in st.session_state.just_launched
+            if _active_db_statuses.get(cid) in ("uploaded", "processing")
+        }
 
     if "selected_calls" not in st.session_state:
         st.session_state.selected_calls = set()
@@ -204,15 +241,35 @@ else:
             label_visibility="collapsed",
         )
 
+    # Direction filter — derived from filename suffix (-Inbound.wav / -Outbound.wav).
+    # Omazz CDR system tags every file this way; no DB column needed.
+    direction_filter = st.radio(
+        "ทิศทางสาย",
+        ["ทั้งหมด", "📥 Inbound (สายเข้า)", "📤 Outbound (สายออก)"],
+        horizontal=True,
+        key="_call_direction_filter",
+        label_visibility="collapsed",
+    )
+
     # Apply filter
     _status_map = {
         "Pending": "uploaded", "Processing": "processing",
         "Done": "done", "Error": "error",
     }
+    _direction_map = {
+        "📥 Inbound (สายเข้า)": "inbound",
+        "📤 Outbound (สายออก)": "outbound",
+    }
     filtered_calls = refresh_calls
     if status_filter != "ทั้งหมด":
         want = _status_map[status_filter]
         filtered_calls = [c for c in filtered_calls if c["status"] == want]
+    if direction_filter != "ทั้งหมด":
+        want_dir = _direction_map[direction_filter]
+        filtered_calls = [
+            c for c in filtered_calls
+            if extract_direction_from_filename(c.get("filename", "")) == want_dir
+        ]
     if q:
         def _match(c):
             hay = " ".join([
@@ -246,6 +303,7 @@ else:
         f"พบ **{len(filtered_calls)}** / {len(refresh_calls)} ไฟล์"
         + (f"  •  🔍 `{q}`" if q else "")
         + (f"  •  สถานะ: **{status_filter}**" if status_filter != "ทั้งหมด" else "")
+        + (f"  •  ทิศทาง: **{direction_filter}**" if direction_filter != "ทั้งหมด" else "")
     )
 
     # ── Bulk actions ──────────────────────────────────────────────────────
@@ -288,7 +346,7 @@ else:
     PAGE_SIZE = 20
     # Reset page size when search/filter/sort changes, so users aren't stuck
     # seeing a stale "Load more" count after narrowing the list.
-    _filter_key = (q, status_filter, sort_mode)
+    _filter_key = (q, status_filter, direction_filter, sort_mode)
     if st.session_state.get("_call_filter_key") != _filter_key:
         st.session_state._call_filter_key = _filter_key
         st.session_state._call_page_size = PAGE_SIZE
@@ -576,8 +634,9 @@ else:
 
 @st.fragment(run_every=3)
 def _auto_refresh_status():
-    fresh_calls = db.get_all_calls()
-    active = [c for c in fresh_calls if c["status"] == "processing"]
+    # Scope to processing-only rows — this fragment runs every 3 seconds,
+    # so scanning the full calls table here is wasteful at 10K+ uploads.
+    active = db.get_processing_calls()
 
     has_processing = bool(active)
     if has_processing:

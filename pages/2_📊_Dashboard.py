@@ -9,6 +9,7 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Dashboard", page_icon="📊", layout="wide")
 
 from smartvoice import db
+from smartvoice.file_manager import extract_agent_code_from_filename
 from smartvoice.ollama_client import sanitize_evidence, sanitize_next_action
 from smartvoice.ui_helpers import init_page, metric_card, sentiment_emoji
 
@@ -71,9 +72,11 @@ if total_in_db == 0:
     st.info("No completed calls yet. Upload and process audio files from the Admin page.")
     st.stop()
 
-# Default — ทั้งหมดถ้า ≤ 500 สาย ไม่งั้น 500 ล่าสุด
+# Default — analytics page needs enough data for chart signal to be meaningful.
+# Under 1K rows just load everything; above that, start at 1K latest (chart
+# distributions remain accurate while keeping initial paint under ~1s).
 _default_limit_label = (
-    "ทั้งหมด (อาจช้าเมื่อข้อมูลเยอะ)" if total_in_db <= 500 else "500 สายล่าสุด"
+    "ทั้งหมด (อาจช้าเมื่อข้อมูลเยอะ)" if total_in_db <= 1000 else "1,000 สายล่าสุด"
 )
 if "dashboard_load_limit" not in st.session_state:
     st.session_state["dashboard_load_limit"] = _default_limit_label
@@ -231,6 +234,36 @@ with chart_col2:
         xaxis=dict(gridcolor="rgba(148,163,184,0.15)", zeroline=False),
     )
     st.plotly_chart(fig_topic, width="stretch")
+
+    # ── Drill-down: "แจ้งปัญหาสินค้า" ละเอียดตามประเภทความเสียหาย ──
+    # Omazz ขอให้แสดงประเภทความเสียหายแบบเจาะจง (ผ้าขาด/เตียงหัก/...) แทน
+    # หมวดกว้าง — pipeline เก็บไว้ใน column topic_detail (ดู prompts.py)
+    if "topic_detail" in df.columns:
+        detail_series = df.loc[
+            df["topic"] == "แจ้งปัญหาสินค้า", "topic_detail"
+        ].replace("", pd.NA).dropna()
+        if not detail_series.empty:
+            detail_counts = detail_series.value_counts().reset_index()
+            detail_counts.columns = ["Detail", "Count"]
+            st.caption("เจาะลึก: ประเภทความเสียหายภายใน \"แจ้งปัญหาสินค้า\"")
+            fig_detail = px.bar(
+                detail_counts, x="Count", y="Detail", orientation="h", text="Count",
+                color="Count", color_continuous_scale=_SCALE_RED,
+            )
+            fig_detail.update_traces(
+                textposition="outside",
+                textfont=_BAR_TEXTFONT,
+                marker=dict(cornerradius=_BAR_CORNER, line=dict(width=0)),
+                hovertemplate="<b>%{y}</b><br>จำนวน: %{x} สาย<extra></extra>",
+            )
+            fig_detail.update_layout(
+                **_CHART_LAYOUT, xaxis_title="จำนวนสาย", yaxis_title="",
+                margin=dict(t=10, b=20, r=60), yaxis=dict(autorange="reversed"),
+                coloraxis_showscale=False,
+                xaxis=dict(gridcolor="rgba(148,163,184,0.15)", zeroline=False),
+                height=max(200, 40 * len(detail_counts) + 80),
+            )
+            st.plotly_chart(fig_detail, width="stretch")
 
 st.divider()
 
@@ -458,6 +491,7 @@ for call in done_calls:
             "filename": call["filename"],
             "phone": call.get("customer_phone") or "",
             "created_at": call.get("created_at") or "",
+            "agent_code": extract_agent_code_from_filename(call["filename"]) or "",
             "politeness": politeness,
             "problem_solving": problem_solving,
             "overall_score": politeness + problem_solving,
@@ -507,8 +541,10 @@ for case_id, entries in case_groups.items():
     else:
         label = f"{_phone_prefix(phone)}📂 เคส #{case_id} — {case['subject']} ({n} สาย)"
     evidence_prefix = f"เฉลี่ยจาก {n} สาย; ล่าสุด: " if n > 1 else ""
+    case_agent_codes = sorted({e["agent_code"] for e in entries if e["agent_code"]})
     agent_rows.append({
         "Label": label,
+        "Agent": ", ".join(case_agent_codes) if case_agent_codes else "—",
         "Politeness": f"{sum(e['politeness'] for e in entries) / n:.1f} / 5.0",
         "Politeness Evidence": f"{evidence_prefix}{latest['politeness_evidence']}",
         "Problem Solving": f"{sum(e['problem_solving'] for e in entries) / n:.1f} / 5.0",
@@ -516,12 +552,14 @@ for case_id, entries in case_groups.items():
         "Next Action": CLOSED_ACTION if is_closed else latest["next_action"],
         "Owner": CLOSED_OWNER if is_closed else latest["next_action_owner"],
         "Score": round(sum(e["overall_score"] for e in entries) / n, 1),
+        "_agent_codes": case_agent_codes,
         "_sort": entries_sorted[-1]["created_at"],
     })
 
 for entry in solo_calls:
     agent_rows.append({
         "Label": f"{_phone_prefix(entry['phone'])}{entry['filename']}",
+        "Agent": entry["agent_code"] or "—",
         "Politeness": f"{entry['politeness']:.1f} / 5.0",
         "Politeness Evidence": entry["politeness_evidence"],
         "Problem Solving": f"{entry['problem_solving']:.1f} / 5.0",
@@ -529,6 +567,7 @@ for entry in solo_calls:
         "Next Action": entry["next_action"],
         "Owner": entry["next_action_owner"],
         "Score": entry["overall_score"],
+        "_agent_codes": [entry["agent_code"]] if entry["agent_code"] else [],
         "_sort": entry["created_at"],
     })
 
@@ -559,13 +598,28 @@ if agent_rows:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # Collect available agent codes (sorted) for the filter dropdown
+    _all_agent_codes = sorted({
+        code
+        for codes in ap_df_full["_agent_codes"]
+        for code in codes
+        if code
+    })
+
     # ── Search + pagination — กันแถวเยอะเกินเมื่อโหลดสายจำนวนมาก ────────────
-    ap_search_col, ap_score_col, ap_size_col = st.columns([2.2, 1.4, 1])
+    ap_search_col, ap_agent_col, ap_score_col, ap_size_col = st.columns([2, 1.2, 1.4, 1])
     with ap_search_col:
         ap_search = st.text_input(
             "🔍 ค้นหา (เบอร์ / ชื่อไฟล์ / Subject / Next Action)",
             key="agent_perf_search",
             placeholder="เช่น 081-999-9336, แจ้งปัญหา, ติดตาม",
+        )
+    with ap_agent_col:
+        ap_agent_filter = st.selectbox(
+            "Agent",
+            ["ทั้งหมด"] + _all_agent_codes,
+            key="agent_perf_agent",
+            help="กรองตามรหัส Agent (สกัดจาก suffix ของชื่อไฟล์)",
         )
     with ap_score_col:
         ap_score_filter = st.selectbox(
@@ -589,6 +643,10 @@ if agent_rows:
             | ap_df["Next Action"].astype(str).str.contains(s, case=False, na=False)
         )
         ap_df = ap_df[mask]
+    if ap_agent_filter != "ทั้งหมด":
+        # Case rows may aggregate multiple agents — keep if the picked code
+        # handled at least one call in the case
+        ap_df = ap_df[ap_df["_agent_codes"].apply(lambda codes: ap_agent_filter in codes)]
     if ap_score_filter == "< 6 (ต้องปรับปรุง)":
         ap_df = ap_df[ap_df["Score"] < 6]
     elif ap_score_filter == "6–7.9 (พอใช้)":
@@ -629,12 +687,16 @@ if agent_rows:
             )
 
     if ap_total > 0:
+        # Drop the hidden filter column before rendering — used only for
+        # selecting rows by agent code above
+        _display_df = ap_df.iloc[ap_start:ap_end].drop(columns=["_agent_codes"], errors="ignore")
         st.dataframe(
-            ap_df.iloc[ap_start:ap_end],
+            _display_df,
             width="stretch",
             hide_index=True,
             column_config={
                 "Label": st.column_config.TextColumn("สาย / เคส", width="large"),
+                "Agent": st.column_config.TextColumn("Agent", width="small"),
                 "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%.1f / 10"),
                 "Politeness Evidence": st.column_config.TextColumn("หลักฐาน Politeness", width="large"),
                 "Problem Solving Evidence": st.column_config.TextColumn("หลักฐาน Problem Solving", width="large"),

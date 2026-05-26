@@ -1536,6 +1536,7 @@ def process_call(call_id: int, step_callback=None) -> dict:
             anomaly_reason=analysis.get("anomaly_reason", ""),
             sentiment_reason=analysis.get("sentiment_reason", ""),
             anomaly_severity=analysis.get("anomaly_severity", ""),
+            topic_detail=analysis.get("topic_detail", ""),
         )
 
         # ── Auto Case Assignment ──

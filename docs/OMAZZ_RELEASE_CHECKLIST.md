@@ -16,7 +16,7 @@ Use this before sending SmartVoice to Omazz or running a live demo.
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-Expected current baseline: `145 passed` as of 2026-05-20 (warnings about `.pytest_cache` permissions are non-blocking if all tests pass; if you hit `PermissionError` on the pytest tmp dir, pass `--basetemp="$env:TEMP\pytest-clean"`).
+Expected current baseline: `190 passed` as of 2026-05-27 (warnings about `.pytest_cache` permissions are non-blocking if all tests pass; if you hit `PermissionError` on the pytest tmp dir, pass `--basetemp="$env:TEMP\pytest-clean"`).
 
 - Open Home and verify `Deployment readiness`.
 - Create demo users with hashed passwords:
@@ -66,12 +66,13 @@ Recommended demo flow:
 2. Log in as Admin.
 3. Upload one anonymized Omazz warranty call.
 4. Process the call and show the tagged transcript.
-5. Show how the system auto-links customer/warranty from the filename phone number.
+5. Show how the system auto-links customer/warranty from the filename phone number, and how Inbound/Outbound + Agent code are derived from the same filename.
 6. Show case grouping, next action owner, and case merge if relevant.
-7. Open Dashboard for sentiment, issue keywords, anomaly, agent performance, QA evidence, and case summary.
+7. Open Dashboard for sentiment, issue keywords, anomaly, agent performance, QA evidence, and case summary. Show the "เจาะลึก" drill-down chart under Topic Distribution for product-issue damage categories.
 8. Confirm Next Action rows use case-specific content and do not repeat fake prompt examples such as fixed amounts, product codes, or phone numbers.
-9. Open Customers for warranty history and linked call context.
-10. Open Settings briefly to show Demo / Real AI switching.
+9. Show Admin's Inbound/Outbound filter and Dashboard's Agent filter on Agent Performance.
+10. Open Customers for warranty history and linked call context.
+11. Open Settings briefly to show Demo / Real AI switching.
 
 ## Privacy notes
 

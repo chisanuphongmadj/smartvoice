@@ -103,3 +103,48 @@ def extract_phone_from_filename(filename: str) -> str | None:
     name = os.path.splitext(filename)[0]
     match = _THAI_PHONE_RE.search(name)
     return match.group(0) if match else None
+
+
+def extract_direction_from_filename(filename: str) -> str | None:
+    """Detect call direction from CDR-style filenames.
+
+    Filenames produced by the recording system end with `-Inbound.wav` or
+    `-Outbound.wav`. Returns "inbound" / "outbound" / None (when the suffix
+    is missing — e.g. manually renamed files).
+    """
+    if not filename:
+        return None
+    lower = filename.lower()
+    if "inbound" in lower:
+        return "inbound"
+    if "outbound" in lower:
+        return "outbound"
+    return None
+
+
+def extract_agent_code_from_filename(filename: str) -> str | None:
+    """Extract the agent (extension) code from a CDR-style filename.
+
+    Example layouts produced by Omazz's recording system:
+      Outbound: 20251104173706-1762252614.105999-104-0819979336-Outbound.wav
+      Inbound:  20251225134209-1766644826.135925-0631451550-104-Inbound.wav
+
+    The agent extension is always a short numeric segment (2-5 digits)
+    distinct from:
+      • the 14-digit timestamp prefix
+      • a 10-digit Thai phone number starting with "0"
+    """
+    if not filename:
+        return None
+    name = os.path.splitext(filename)[0]
+    for seg in name.split("-"):
+        seg = seg.strip()
+        if not seg.isdigit():
+            continue
+        if len(seg) == 14:                     # timestamp prefix
+            continue
+        if len(seg) == 10 and seg.startswith("0"):  # Thai phone
+            continue
+        if 2 <= len(seg) <= 5:
+            return seg
+    return None

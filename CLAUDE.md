@@ -25,9 +25,12 @@ streamlit run Home.py       # → http://localhost:8501
 
 # Seed mock data
 & ".venv\Scripts\python.exe" scripts\seed_mock_data.py
+
+# Backfill topic_detail for legacy "แจ้งปัญหาสินค้า" calls (dry-run by default)
+& ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 145 tests, must pass 100% before every commit.
+**Current test baseline:** 190 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -42,11 +45,11 @@ ollama serve
 | File | Role |
 |------|------|
 | `config.py` | Single source of truth for all env vars |
-| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`) |
+| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)` |
 | `pipeline.py` | Core orchestrator — speaker correction multi-pass, case assignment (~70 KB) |
 | `prompts.py` | All LLM prompt templates (~54 KB) |
-| `ollama_client.py` | LLM client + JSON extraction; 4 separate analysis calls |
-| `file_manager.py` | Audio upload + SHA-256 deduplication |
+| `ollama_client.py` | LLM client + JSON extraction; 4 separate analysis calls. Includes `normalize_topic_detail()` for the product-issue drill-down vocabulary |
+| `file_manager.py` | Audio upload + SHA-256 deduplication. Filename helpers: `extract_phone_from_filename()`, `extract_direction_from_filename()` (Inbound/Outbound), `extract_agent_code_from_filename()` |
 | `ui_helpers.py` | Shared CSS, badges, processing launchers |
 | `auth.py` | Streamlit login |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
@@ -75,7 +78,7 @@ Pyannote frequently mislabels speakers; LLM also makes mistakes — the system u
 ### LLM analysis (`ollama_client.py:300+`)
 
 4 separate Ollama calls (split for context window + accuracy):
-1. `extract_summary_and_topics()` — summary, topic, keywords
+1. `extract_summary_and_topics()` — summary, topic, **topic_detail** (drill-down for product-issue calls), keywords, brand/platform mentions
 2. `analyze_sentiment()` — sentiment + reason
 3. `evaluate_agent_qa()` — politeness, problem_solving, evidence, overall_score, next_action, next_action_owner
 4. `detect_anomaly()` — anomaly flag, reason, severity
@@ -83,6 +86,8 @@ Pyannote frequently mislabels speakers; LLM also makes mistakes — the system u
 Every call → `extract_json()` → falls back to empty dict on parse failure (logs and continues).
 
 Agent QA guardrails: `politeness` and `problem_solving` must be supported by Agent quotes, persisted as `politeness_evidence` / `problem_solving_evidence`; scores are clamped to 1-5 and `overall_score` is recomputed as `politeness + problem_solving` in Python.
+
+`topic_detail` vocabulary (filled only when `topic == "แจ้งปัญหาสินค้า"`): `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ`. Output is clamped server-side via `normalize_topic_detail()` so the dashboard can group cleanly.
 
 ### Auto case assignment (`pipeline.py:_auto_assign_case`)
 
@@ -129,6 +134,23 @@ Anomaly = escalation-worthy event, NOT just negative sentiment. Every flag requi
 | C Safety/legal | "เชื้อรา", "สารเคมี", "บาดเจ็บ", damage + amount | medium-low |
 
 Normal complaints resolved politely = negative sentiment, **not** anomaly.
+
+## Scale-friendly Admin / Dashboard
+
+Both pages cap row loading so they stay responsive at 10K+ uploads:
+
+- **Admin** (`pages/1_📤_Admin.py`): top metric cards read from `count_calls_by_status()` (SQL `GROUP BY`) so they're accurate even when only the latest-N rows are loaded for display. Load-limit picker defaults to `200 ล่าสุด` when total > 200, else `ทั้งหมด`. "Process All Pending" uses `get_pending_call_ids()` (lazy) so old pending calls aren't missed. The `@st.fragment(run_every=3)` auto-refresh queries only `get_processing_calls()` (typically 0-1 rows) instead of the full table.
+- **Dashboard** (`pages/2_📊_Dashboard.py`): load-limit picker defaults to `1,000 ล่าสุด` when total > 1000, else `ทั้งหมด`. Analytics signal quality matters more here than first-paint speed, so the default is larger than on Admin.
+
+## Filename-derived filters
+
+Three pieces of metadata are derived from the CDR filename pattern `YYYYMMDDHHMMSS-CALLID.NNN-{AGENT|PHONE}-{PHONE|AGENT}-{Inbound|Outbound}.wav`:
+
+- **Phone** — `extract_phone_from_filename()` (used during upload for customer auto-link)
+- **Direction** — `extract_direction_from_filename()` → powers the Inbound/Outbound radio filter on Admin
+- **Agent extension** — `extract_agent_code_from_filename()` → powers the Agent dropdown filter on the Dashboard Agent Performance section. Returns the short numeric segment (2-5 digits) that isn't the 14-digit timestamp or a 10-digit Thai phone.
+
+No DB migration needed for direction/agent — derive at filter-time.
 
 ## Known Pitfalls
 

@@ -131,6 +131,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         ("case_id",            "INTEGER"),
         ("uploaded_by",       "TEXT"),
         ("uploaded_by_role",  "TEXT"),
+        ("topic_detail",      "TEXT"),
     ]
     for col, col_type in new_cols:
         if col not in existing:
@@ -212,6 +213,7 @@ def update_call_results(
     anomaly_reason: str = "",
     sentiment_reason: str = "",
     anomaly_severity: str = "",
+    topic_detail: str = "",
 ) -> None:
     now = _now()
     conn = get_connection()
@@ -224,6 +226,7 @@ def update_call_results(
                 brand_mentions = ?, platform_mentions = ?,
                 anomaly_detected = ?, anomaly_reason = ?,
                 sentiment_reason = ?, anomaly_severity = ?,
+                topic_detail = ?,
                 status = 'done', updated_at = ?
             WHERE id = ?
             """,
@@ -233,16 +236,76 @@ def update_call_results(
                 brand_mentions, platform_mentions,
                 int(anomaly_detected), anomaly_reason,
                 sentiment_reason, anomaly_severity,
+                topic_detail,
                 now, call_id,
             ),
         )
     conn.close()
 
 
-def get_all_calls() -> list[dict]:
+def get_all_calls(limit: int | None = None) -> list[dict]:
+    """Return all calls newest-first.
+
+    `limit=None` keeps the original behavior (return everything). Passing an
+    int caps the result for the Admin page so it stays responsive at scale
+    (10K+ uploads). Status counts displayed at the top of the page should
+    use `count_calls_by_status()` so they remain accurate even when this
+    call returns a capped subset.
+    """
+    conn = get_connection()
+    sql = "SELECT * FROM calls ORDER BY created_at DESC"
+    params: tuple = ()
+    if limit is not None:
+        sql += " LIMIT ?"
+        params = (int(limit),)
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_calls_by_status() -> dict[str, int]:
+    """Return {'uploaded': N, 'processing': N, 'done': N, 'error': N, 'total': N}.
+
+    Implemented as a single GROUP BY so the Admin page can show accurate
+    counts without loading the full table.
+    """
     conn = get_connection()
     rows = conn.execute(
-        "SELECT * FROM calls ORDER BY created_at DESC"
+        "SELECT status, COUNT(*) AS n FROM calls GROUP BY status"
+    ).fetchall()
+    conn.close()
+    counts = {"uploaded": 0, "processing": 0, "done": 0, "error": 0}
+    for r in rows:
+        if r["status"] in counts:
+            counts[r["status"]] = int(r["n"] or 0)
+    counts["total"] = sum(counts.values())
+    return counts
+
+
+def get_pending_call_ids() -> list[int]:
+    """Return IDs of every call awaiting processing (status='uploaded').
+
+    Used by "Process All Pending" — the Admin page now loads only the latest
+    N rows for display, so we cannot derive the full pending set from that
+    capped list.
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id FROM calls WHERE status = 'uploaded' ORDER BY created_at ASC"
+    ).fetchall()
+    conn.close()
+    return [int(r["id"]) for r in rows]
+
+
+def get_processing_calls() -> list[dict]:
+    """Return all calls currently in 'processing' state (usually 0-1 rows).
+
+    Used by the Admin auto-refresh fragment so it doesn't have to scan the
+    whole table every 3 seconds.
+    """
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM calls WHERE status = 'processing' ORDER BY updated_at DESC"
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]

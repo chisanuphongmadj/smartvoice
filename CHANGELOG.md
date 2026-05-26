@@ -5,6 +5,34 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.2.0] — 2026-05-27 — Post-delivery feedback round 1
+
+### Added
+- `topic_detail` column on `calls` + controlled vocabulary in extraction prompt: `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ` (Omazz feedback: "แจ้งปัญหาสินค้า" หมวดเดียวกว้างเกินไป)
+- Drill-down chart "เจาะลึก: ประเภทความเสียหายภายใน 'แจ้งปัญหาสินค้า'" บน Dashboard ใต้ Topic / Intent Distribution
+- `ollama_client.normalize_topic_detail()` — clamp LLM output ให้อยู่ใน vocabulary 7 ค่า (keyword snap + fallback "อื่นๆ")
+- Scale-friendly DB helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, และ `get_all_calls(limit=N)` — รองรับการใช้งานที่ 10K+ uploads
+- Load-limit picker บนหน้า Admin (`100 / 200 / 500 / 1,000 / 5,000 / ทั้งหมด`) และ Dashboard (`100 / 500 / 1,000 / 5,000 / ทั้งหมด`) — default แยกตาม use case
+- Inbound / Outbound radio filter บนหน้า Admin (`extract_direction_from_filename()`)
+- Agent dropdown filter + "Agent" column บน Dashboard → Agent Performance (`extract_agent_code_from_filename()`)
+- `scripts/backfill_topic_detail.py` — re-classify topic_detail ของ call เก่า ๆ ที่ topic="แจ้งปัญหาสินค้า" แต่ยังไม่มี detail (LLM-only, ไม่รัน STT)
+
+### Changed
+- หน้า Admin metric cards เปลี่ยนมาใช้ `db.count_calls_by_status()` (SQL aggregate) แทนการนับจาก list ที่โหลดมา — ตัวเลขแม่นแม้โหลดแค่ N สายล่าสุด
+- หน้า Admin "Process All Pending" ใช้ `db.get_pending_call_ids()` lazy query — ไม่พลาด pending เก่าที่อยู่นอก scope load limit
+- Auto-refresh fragment ของ Admin (รันทุก 3 วิ) เปลี่ยนจาก `get_all_calls()` ทั้งตาราง → `get_processing_calls()` เฉพาะ row ที่กำลัง process (โดยปกติ 0-1 row)
+- Dashboard default load: `ทั้งหมด ≤ 500 / ไม่งั้น 500 ล่าสุด` → `ทั้งหมด ≤ 1,000 / ไม่งั้น 1,000 ล่าสุด` (analytics ต้องการ signal มาก)
+- Admin default load: `ทั้งหมด ≤ 500 / ไม่งั้น 500 ล่าสุด` → `ทั้งหมด ≤ 200 / ไม่งั้น 200 ล่าสุด` (ops focus on recent)
+
+### Database
+- `_migrate()` เพิ่ม column `topic_detail TEXT` (NULL สำหรับ row เก่า — ไม่ break migration)
+- `docs/database_design.md` อัปเดต ER diagram + data dictionary
+
+### Tests
+- Test baseline ปัจจุบัน: `190 passed` (เดิม 145) — เพิ่ม regression สำหรับ topic_detail vocabulary, normalize_topic_detail, scale-friendly helpers, filename direction/agent extraction
+
+---
+
 ## [1.1.0] — 2026-05-20 — Delivery handoff (ส่งมอบ 2026-05-23)
 
 ### Added

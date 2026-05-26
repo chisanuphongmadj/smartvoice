@@ -41,7 +41,7 @@ run.bat                 # Windows
 ./run.sh                # Linux/macOS
 ```
 
-**Test baseline ล่าสุด:** 145 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
+**Test baseline ล่าสุด:** 190 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
 
 ---
 
@@ -138,7 +138,7 @@ smartvoice/
 ### 5.2 LLM analysis (`ollama_client.py:300+`)
 
 4 separate LLM calls (ไม่รวมในก้อนเดียวเพราะ context window + ความแม่นยำ):
-1. `extract_summary_and_topics()` — summary + topic + keywords
+1. `extract_summary_and_topics()` — summary + topic + **topic_detail** + keywords + brand/platform mentions
 2. `analyze_sentiment()` — sentiment + reason
 3. `evaluate_agent_qa()` — politeness + problem_solving + evidence + overall_score + next_action + next_action_owner
 4. `detect_anomaly()` — anomaly flag + reason + severity
@@ -146,6 +146,8 @@ smartvoice/
 ทุก call → `extract_json()` → fallback เป็น empty dict ถ้า parse fail (log + continue)
 
 **Agent QA guardrails ล่าสุด:** `politeness` และ `problem_solving` ต้องอิงหลักฐานจากคำพูด Agent ใน transcript, เก็บ `politeness_evidence` / `problem_solving_evidence`, clamp คะแนนย่อยให้อยู่ช่วง 1-5, และคำนวณ `overall_score = politeness + problem_solving` ใน backend เสมอ
+
+**`topic_detail` vocabulary** (กรอกเมื่อ `topic == "แจ้งปัญหาสินค้า"` เท่านั้น): `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ` — clamp ผ่าน `ollama_client.normalize_topic_detail()` ก่อนเขียน DB เพื่อให้ chart group ได้สะอาด
 
 ### 5.3 Auto case assignment (`pipeline.py:_auto_assign_case`)
 
@@ -193,6 +195,32 @@ smartvoice/
 - ชื่อบริษัท "โอมาสนา" / "โนโลตัส" / "ฟิวทู" / "โลตัส" — Whisper สับสนชื่อยี่ห้อบ่อย
 - "ที่นอน" บางครั้งเป็น "ที่โน่น" / "ทีเนี่ย"
 - เลขโทรศัพท์ Thai มักผิดเป็นไทย-อังกฤษปน
+
+---
+
+## 6.4 Scale-friendly Admin / Dashboard
+
+ทั้งสองหน้าจำกัดจำนวน row ที่โหลดเข้ามา render เพื่อให้ไม่ค้างเมื่อมี 10K+ ไฟล์:
+
+- **Admin** (`pages/1_📤_Admin.py`): metric cards ใช้ `db.count_calls_by_status()` (SQL `GROUP BY`) ให้แม่นแม้โหลดแค่ N สายล่าสุด. Load-limit picker default `200 ล่าสุด` ถ้า total > 200. "Process All Pending" lazy query ผ่าน `db.get_pending_call_ids()`. Auto-refresh fragment ใช้ `db.get_processing_calls()` (0-1 row โดยปกติ).
+- **Dashboard** (`pages/2_📊_Dashboard.py`): load-limit default `1,000 ล่าสุด` ถ้า total > 1000 — analytics ต้อง signal มาก กว่าหน้า Admin
+
+## 6.5 Filename-derived filters
+
+Filename รูปแบบ `YYYYMMDDHHMMSS-CALLID.NNN-{AGENT|PHONE}-{PHONE|AGENT}-{Inbound|Outbound}.wav` ใช้สกัด:
+
+- **Phone** — `file_manager.extract_phone_from_filename()` (auto-link ตอน upload)
+- **Direction** — `file_manager.extract_direction_from_filename()` → radio filter Inbound/Outbound ที่หน้า Admin
+- **Agent extension** — `file_manager.extract_agent_code_from_filename()` → dropdown filter Agent ที่ Dashboard → Agent Performance (segment 2-5 หลัก ที่ไม่ใช่ timestamp 14 หลักและไม่ใช่เบอร์ไทย)
+
+ไม่ต้อง migrate DB — derive runtime ตอนกรอง
+
+## 6.6 Backfill scripts
+
+- `scripts/scrub_existing_next_actions.py` — ลบ prompt-example placeholder ที่หลุดเข้า `agent_performance` เก่า
+- `scripts/backfill_topic_detail.py` — re-classify `topic_detail` ของสายเก่าที่ `topic="แจ้งปัญหาสินค้า"` แต่ยังไม่มี detail (LLM-only, ไม่รัน STT ใหม่)
+
+ทั้งคู่มี `--apply` flag (default = dry-run)
 
 ---
 

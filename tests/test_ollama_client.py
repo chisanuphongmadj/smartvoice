@@ -409,5 +409,92 @@ class TestPrepareConversationText(unittest.TestCase):
         self.assertNotIn("turn-35", text)
 
 
+class TestNormalizeTopicDetail(unittest.TestCase):
+    """Drill-down vocabulary for "แจ้งปัญหาสินค้า" (Omazz request) must stay on
+    a fixed list so the dashboard can group cleanly."""
+
+    def test_blank_when_topic_is_not_product_issue(self):
+        # Even if LLM leaks a value, it should be discarded for non-issue topics
+        self.assertEqual(
+            ollama_client.normalize_topic_detail("สอบถามการจัดส่ง", "ผ้าขาด/ผ้าหุ้มชำรุด"),
+            "",
+        )
+
+    def test_exact_match_passes_through(self):
+        self.assertEqual(
+            ollama_client.normalize_topic_detail(
+                ollama_client.PRODUCT_ISSUE_TOPIC, "เตียง/โครงหัก"
+            ),
+            "เตียง/โครงหัก",
+        )
+
+    def test_partial_match_snaps_to_allowed_label(self):
+        # LLM said "ผ้าหุ้มขาด" — should snap to "ผ้าขาด/ผ้าหุ้มชำรุด"
+        self.assertEqual(
+            ollama_client.normalize_topic_detail(
+                ollama_client.PRODUCT_ISSUE_TOPIC, "ผ้าหุ้มขาด"
+            ),
+            "ผ้าขาด/ผ้าหุ้มชำรุด",
+        )
+
+    def test_empty_value_falls_back_to_other(self):
+        # Product-issue topic but LLM gave no detail → "อื่นๆ" (not blank,
+        # so the drill-down chart still accounts for the call)
+        self.assertEqual(
+            ollama_client.normalize_topic_detail(ollama_client.PRODUCT_ISSUE_TOPIC, ""),
+            "อื่นๆ",
+        )
+
+    def test_unrelated_text_falls_back_to_other(self):
+        self.assertEqual(
+            ollama_client.normalize_topic_detail(
+                ollama_client.PRODUCT_ISSUE_TOPIC, "ลูกค้าไม่พอใจ"
+            ),
+            "อื่นๆ",
+        )
+
+    def test_non_string_input_falls_back_to_other(self):
+        self.assertEqual(
+            ollama_client.normalize_topic_detail(ollama_client.PRODUCT_ISSUE_TOPIC, None),
+            "อื่นๆ",
+        )
+
+
+class TestExtractSummaryAndTopicsTopicDetail(unittest.TestCase):
+    """End-to-end: extraction call must expose topic_detail downstream."""
+
+    def _mock(self, payload: dict):
+        return json.dumps(payload, ensure_ascii=False)
+
+    def test_topic_detail_propagates_for_product_issue(self):
+        with patch.object(ollama_client, "chat", return_value=self._mock({
+            "summary": "ลูกค้าแจ้งที่นอนผ้าขาด",
+            "topic": "แจ้งปัญหาสินค้า",
+            "topic_detail": "ผ้าขาด/ผ้าหุ้มชำรุด",
+            "keywords": ["ผ้าขาด"],
+            "brand_mentions": [],
+            "platform_mentions": [],
+        })):
+            out = ollama_client.extract_summary_and_topics(
+                [{"speaker": "Customer", "text": "ผ้าขาดครับ"}]
+            )
+        self.assertEqual(out["topic_detail"], "ผ้าขาด/ผ้าหุ้มชำรุด")
+
+    def test_topic_detail_blanked_for_non_product_topic(self):
+        # LLM erroneously fills topic_detail on a delivery question — must blank
+        with patch.object(ollama_client, "chat", return_value=self._mock({
+            "summary": "ลูกค้าถามวันส่ง",
+            "topic": "สอบถามการจัดส่ง",
+            "topic_detail": "ผ้าขาด/ผ้าหุ้มชำรุด",
+            "keywords": [],
+            "brand_mentions": [],
+            "platform_mentions": [],
+        })):
+            out = ollama_client.extract_summary_and_topics(
+                [{"speaker": "Customer", "text": "ของส่งเมื่อไหร่"}]
+            )
+        self.assertEqual(out["topic_detail"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

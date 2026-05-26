@@ -376,6 +376,54 @@ def _prepare_conversation_text(conversation) -> str:
     return text
 
 
+# Allowed topic_detail values when topic = "แจ้งปัญหาสินค้า". Kept in sync with
+# the controlled vocabulary in prompts.py so the LLM cannot drift the labels.
+PRODUCT_ISSUE_TOPIC = "แจ้งปัญหาสินค้า"
+TOPIC_DETAIL_CHOICES = (
+    "ผ้าขาด/ผ้าหุ้มชำรุด",
+    "เตียง/โครงหัก",
+    "สปริง/ฟองน้ำยุบ",
+    "เปื้อน/รอยขีดข่วน",
+    "ความชื้น/น้ำท่วม",
+    "ขนาด/สเปคผิด",
+    "อื่นๆ",
+)
+_TOPIC_DETAIL_FALLBACK = "อื่นๆ"
+# Stem keywords used to snap LLM rewordings back to the canonical label.
+# Order matters: first hit wins, so put more specific stems before generic ones.
+_TOPIC_DETAIL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("เปื้อน/รอยขีดข่วน",   ("เปื้อน", "คราบ", "รอยขีด", "ขีดข่วน", "รอยถลอก")),
+    ("ความชื้น/น้ำท่วม",    ("เชื้อรา", "ชื้น", "น้ำท่วม", "อับชื้น", "รา")),
+    ("สปริง/ฟองน้ำยุบ",     ("สปริง", "ฟองน้ำ", "ยุบ", "เป็นแอ่ง")),
+    ("เตียง/โครงหัก",       ("เตียงหัก", "โครงเตียง", "โครงหัก", "ขาเตียง", "หัวเตียง")),
+    ("ผ้าขาด/ผ้าหุ้มชำรุด", ("ผ้าขาด", "ผ้าหุ้ม", "ปลอก", "ผ้าฉีก", "ผ้า")),
+    ("ขนาด/สเปคผิด",        ("ขนาดไม่ตรง", "ผิดรุ่น", "สเปคผิด", "สีผิด", "ผิดสเปค", "ไม่ตรงปก")),
+)
+
+
+def normalize_topic_detail(topic: str, raw_detail) -> str:
+    """Clamp LLM-produced topic_detail to the allowed vocabulary.
+
+    Why: Typhoon-8B occasionally rewords labels ("ผ้าขาด/ผ้าหุ้มชำรุด" →
+    "ผ้าหุ้มขาด") or fills the field even when topic isn't a product-issue
+    call. Keeping the DB on a fixed vocabulary lets the dashboard group cleanly.
+    """
+    if topic != PRODUCT_ISSUE_TOPIC:
+        return ""
+    if not isinstance(raw_detail, str):
+        return _TOPIC_DETAIL_FALLBACK
+    cleaned = raw_detail.strip()
+    if not cleaned:
+        return _TOPIC_DETAIL_FALLBACK
+    if cleaned in TOPIC_DETAIL_CHOICES:
+        return cleaned
+    for label, stems in _TOPIC_DETAIL_KEYWORDS:
+        for stem in stems:
+            if stem in cleaned:
+                return label
+    return _TOPIC_DETAIL_FALLBACK
+
+
 def extract_summary_and_topics(conversation) -> dict:
     """Call 1: Summary, Topic, Keywords, Brands, Platforms."""
     from smartvoice.prompts import build_extraction_prompt
@@ -391,10 +439,13 @@ def extract_summary_and_topics(conversation) -> dict:
     keywords = result.get("keywords", [])
     brand_mentions = result.get("brand_mentions", [])
     platform_mentions = result.get("platform_mentions", [])
+    topic = result.get("topic", "")
+    topic_detail = normalize_topic_detail(topic, result.get("topic_detail", ""))
 
     return {
         "summary": result.get("summary", ""),
-        "topic": result.get("topic", ""),
+        "topic": topic,
+        "topic_detail": topic_detail,
         "keywords": json.dumps(keywords if isinstance(keywords, list) else [], ensure_ascii=False),
         "brand_mentions": json.dumps(brand_mentions if isinstance(brand_mentions, list) else [], ensure_ascii=False),
         "platform_mentions": json.dumps(platform_mentions if isinstance(platform_mentions, list) else [], ensure_ascii=False),
