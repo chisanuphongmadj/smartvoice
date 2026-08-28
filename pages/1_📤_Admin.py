@@ -6,10 +6,10 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Admin", page_icon="📤", layout="wide")
 
 from smartvoice import db, file_manager
+from smartvoice.auth import PAGE_ADMIN, role_label
 from smartvoice.file_manager import extract_direction_from_filename
 from smartvoice.preflight import get_ollama_readiness, ollama_setup_lines
 from smartvoice.ui_helpers import (
-    get_current_user,
     init_page,
     launch_processing,
     launch_processing_queue,
@@ -17,20 +17,16 @@ from smartvoice.ui_helpers import (
     status_badge,
 )
 
-init_page()
+# Admin/Supervisor only — Agent and QA never see this page in the sidebar, and
+# this guard also blocks a hand-typed /admin URL.
+_current_user, _current_role = init_page(PAGE_ADMIN)
 
 # ─────────────────────────────────────────
 # PAGE: ADMIN — Upload & Process
 # ─────────────────────────────────────────
 st.title("📤 Admin — Upload & Process")
 
-# Require login before allowing uploads — captured for audit trail on each call.
-_current_user, _current_role = get_current_user()
-if not _current_user:
-    st.warning("🔒 กรุณาเข้าสู่ระบบที่ Sidebar ก่อนอัพโหลดไฟล์ (ระบบจะบันทึกว่าใครเป็นผู้อัพโหลดแต่ละไฟล์)")
-    st.stop()
-
-st.caption(f"กำลังเข้าสู่ระบบในชื่อ **{_current_user}** (_{_current_role}_) — ไฟล์ที่อัพโหลดจะถูกบันทึกชื่อผู้อัพโหลด")
+st.caption(f"กำลังเข้าสู่ระบบในชื่อ **{_current_user}** — _{role_label(_current_role)}_ — ไฟล์ที่อัพโหลดจะถูกบันทึกชื่อผู้อัพโหลด")
 
 # Upload section
 st.subheader("1. Upload Audio Files")

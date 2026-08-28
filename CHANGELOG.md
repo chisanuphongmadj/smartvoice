@@ -5,6 +5,61 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased] — หน้าเพิ่มลูกค้า & ทะเบียนรับประกัน (Admin)
+
+### Added
+- หน้าใหม่ `pages/6_➕_Data_Entry.py` (Admin เท่านั้น) — ฟอร์มบันทึกลูกค้าและทะเบียนรับประกันด้วยมือ พร้อมตาราง "เพิ่มล่าสุด" 10 รายการต่อแท็บ
+- `smartvoice/customer_entry.py` — กติกาการตรวจ/บันทึกทั้งหมดแยกออกจาก Streamlit จึงเทสต์ได้: normalize เบอร์ (ตัดขีด/วงเล็บ/เลขไทย), กันเบอร์ซ้ำและเลขทะเบียนซ้ำ, คำนวณวันหมดประกันจาก วันที่ซื้อ + จำนวนเดือน (clamp วันสิ้นเดือน), ช่องว่างบันทึกเป็น NULL
+- `auth.PAGE_DATA_ENTRY` + route ใน `Home.py` — สิทธิ์ให้ Admin เท่านั้น (Supervisor / QA / Agent ไม่เห็นเมนูและเข้าทาง URL ไม่ได้)
+- `tests/test_customer_entry.py` — 20 เทสต์ครอบคลุม validation / expiry / permission
+
+### Changed
+- ย้าย **เปลี่ยนรหัสผ่าน** ออกจากหน้าแรก ไปอยู่ในกล่องบัญชีบน sidebar (`ui_helpers.render_change_password()`) — ใช้ได้จากทุกหน้า ไม่ต้องเด้งกลับหน้าแรก และหน้าแรกเหลือเฉพาะภาพรวมสายเข้า
+- คำเตือน "บัญชี `admin` ยังใช้รหัสผ่านเริ่มต้น" รวมถึง SETUP.md / user_manual.md ชี้ไปที่กล่องบัญชีใน sidebar แทนหน้าแรก
+
+---
+
+## [1.3.0] — 2026-08-21 — Real login + role-based access control
+
+### Added — Authentication
+- ตาราง `users` ใน SQLite (username unique แบบ case-insensitive, display_name, role, PBKDF2 hash, is_active, last_login_at) + CRUD ครบใน `db.py`
+- หน้า **เข้าสู่ระบบ** เต็มหน้าจอ — ยังไม่ login = ไม่มี sidebar และเข้าหน้าใดไม่ได้เลย
+- Bootstrap admin อัตโนมัติเมื่อยังไม่มีบัญชีใดในระบบ (`admin` / `admin1234`) พร้อมคำเตือนค้างใน sidebar + หน้า readiness จนกว่าจะเปลี่ยนรหัสผ่าน
+- หน้าใหม่ `pages/5_👤_Users.py` (Admin เท่านั้น) — เพิ่ม / แก้บทบาท / เปิด-ปิดใช้งาน / รีเซ็ตรหัสผ่าน / ลบบัญชี
+- `🔐 บัญชีของฉัน` บนหน้าแรก — ผู้ใช้ทุก role เปลี่ยนรหัสผ่านตัวเองได้
+- Brute-force guard: รหัสผิดครบ 5 ครั้ง ล็อกฟอร์ม login 60 วินาที
+- Guard rails ในหน้าจัดการผู้ใช้: ต้องเหลือ Admin ที่ใช้งานได้ ≥ 1 บัญชีเสมอ (`auth.would_remove_last_admin()`), และลดสิทธิ์/ลบบัญชีตัวเองไม่ได้
+
+### Added — Role-based navigation
+- `auth.ROLE_PERMISSIONS` — matrix สิทธิ์ต่อหน้าในที่เดียว พร้อม `can_access()` / `visible_pages()` / `normalize_role()`
+- `Home.py` เปลี่ยนเป็น router ที่ใช้ `st.navigation()` สร้างเมนูจากสิทธิ์ของ role ที่ login อยู่ — **หน้าที่ไม่มีสิทธิ์จะไม่ปรากฏใน sidebar เลย** และพิมพ์ URL ตรง ๆ ก็เด้งกลับหน้าแรก
+- `ui_helpers.init_page(page_key)` — server-side guard ประจำทุกหน้า (defense in depth)
+
+| Role | Home | Admin | Dashboard | Customers | Settings | จัดการผู้ใช้ |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| Admin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Supervisor | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| QA | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ |
+| Agent | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ |
+
+### Changed
+- **ลบ demo login ทิ้ง** — เดิมถ้าไม่ตั้ง `SMARTVOICE_USERS` ผู้ใช้พิมพ์ชื่อและ**เลือก role เองได้** (พนักงานเลือก Admin ได้) ตอนนี้ role มาจากบัญชีที่เก็บไว้เท่านั้น
+- `SMARTVOICE_USERS` ใน `.env` ลดบทบาทเป็นบัญชีสำรอง — ระบบตรวจฐานข้อมูลก่อน แล้วค่อยตกมาที่ `.env`
+- `normalize_role()` map ค่าที่ไม่รู้จักเป็น `Agent` (สิทธิ์ต่ำสุด) — ค่า role เพี้ยนใน DB/.env ยกระดับสิทธิ์ไม่ได้
+- หน้า Settings เลิกใช้ `if role in {...}` แบบเขียนเอง เปลี่ยนมาใช้ `init_page(PAGE_SETTINGS)`
+- Preflight check "Authentication" เปลี่ยนเป็นเตือนเมื่อบัญชี `admin` ยังใช้รหัสผ่านเริ่มต้น
+
+### Database
+- `init_db()` เพิ่มตาราง `users` (`CREATE TABLE IF NOT EXISTS` — ไม่กระทบข้อมูลเดิม)
+
+### Known limitation
+- Session ผูกกับ Streamlit session — refresh หน้าเว็บ (F5) = ออกจากระบบ (ยังไม่มี cookie/JWT)
+
+### Tests
+- 209 → 240 tests (100% pass) — ครอบคลุม role matrix, DB-first authentication, บัญชีที่ถูกปิดใช้งาน, bootstrap admin, last-admin protection, และ regression test ที่ fail ถ้ามีหน้าใหม่ที่ไม่ได้ผูก permission
+
+---
+
 ## [1.2.0] — 2026-05-27 — Post-delivery feedback round 1
 
 ### Added — Dashboard / Analytics

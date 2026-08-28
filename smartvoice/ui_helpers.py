@@ -1,11 +1,22 @@
-"""Shared UI helpers for Streamlit pages — CSS, badges, processing launchers."""
+"""Shared UI helpers for Streamlit pages — CSS, login, badges, processing launchers."""
 
 import threading
+import time
 
 import streamlit as st
 
 from smartvoice import db, pipeline
-from smartvoice.auth import authenticate, is_auth_configured
+from smartvoice.auth import (
+    DEFAULT_ADMIN_PASSWORD,
+    DEFAULT_ADMIN_USERNAME,
+    PAGE_LABELS_TH,
+    authenticate,
+    can_access,
+    change_password,
+    default_admin_password_unchanged,
+    ensure_default_admin,
+    role_label,
+)
 from smartvoice.config import (
     WHISPER_MODEL,
     OLLAMA_MODEL,
@@ -116,54 +127,134 @@ def inject_css():
 
 
 # ── Staff login ────────────────────────────────────────────────────────────
+#
+# Every account is verified against a PBKDF2 hash (DB first, then the
+# SMARTVOICE_USERS fallback in .env). There is no self-service role picker:
+# the role always comes from the stored account, so a พนักงาน cannot grant
+# themselves Admin by typing it into a dropdown.
 
-STAFF_ROLES = ["Admin", "Supervisor", "Agent", "QA"]
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCK_SECONDS = 60
+
+_SESSION_KEYS = (
+    "current_user",
+    "current_user_role",
+    "current_username",
+    "current_user_id",
+    "current_user_source",
+)
 
 
-def render_login_widget():
-    """Render a lightweight login at the top of the sidebar.
+def _login_lock_remaining() -> int:
+    """Seconds left on the failed-attempt lockout (0 when not locked)."""
+    locked_until = st.session_state.get("_login_locked_until", 0.0)
+    return max(0, int(locked_until - time.time()))
 
-    If SMARTVOICE_USERS is configured, credentials are checked against PBKDF2
-    hashes. If not configured, the widget falls back to demo/audit mode so
-    evaluators can still open the app without setup friction.
-    """
-    with st.sidebar:
-        user = st.session_state.get("current_user")
-        role = st.session_state.get("current_user_role")
-        auth_enabled = is_auth_configured()
 
-        if user:
-            auth_label = "secured" if auth_enabled else "demo/audit"
-            st.success(f"👤 **{user}**  \n_{role}_  \n`{auth_label}`")
-            if st.button("🚪 Logout", use_container_width=True, key="_logout_btn"):
-                st.session_state.pop("current_user", None)
-                st.session_state.pop("current_user_role", None)
+def _register_login_failure() -> None:
+    fails = st.session_state.get("_login_fail_count", 0) + 1
+    st.session_state["_login_fail_count"] = fails
+    if fails >= LOGIN_MAX_ATTEMPTS:
+        st.session_state["_login_fail_count"] = 0
+        st.session_state["_login_locked_until"] = time.time() + LOGIN_LOCK_SECONDS
+
+
+def start_session(record) -> None:
+    """Store an authenticated UserRecord in the Streamlit session."""
+    st.session_state["current_user"] = record.label
+    st.session_state["current_user_role"] = record.role
+    st.session_state["current_username"] = record.username
+    st.session_state["current_user_id"] = record.user_id
+    st.session_state["current_user_source"] = record.source
+    st.session_state["_login_fail_count"] = 0
+    st.session_state["_login_locked_until"] = 0.0
+
+
+def end_session() -> None:
+    for key in _SESSION_KEYS:
+        st.session_state.pop(key, None)
+
+
+def render_login_page():
+    """Full-page login form — the only screen an anonymous visitor can reach."""
+    _, center, _ = st.columns([1, 1.4, 1])
+    with center:
+        st.markdown("## 🔑 เข้าสู่ระบบ SmartVoice")
+        st.caption("ระบบวิเคราะห์สายสนทนา Call Center — กรุณาเข้าสู่ระบบด้วยบัญชีพนักงาน")
+
+        locked_for = _login_lock_remaining()
+        if locked_for:
+            st.error(
+                f"ใส่รหัสผ่านผิดเกิน {LOGIN_MAX_ATTEMPTS} ครั้ง "
+                f"— กรุณารออีก {locked_for} วินาทีแล้วลองใหม่"
+            )
+
+        with st.form("_login_form"):
+            username = st.text_input("Username", key="_login_username")
+            password = st.text_input("Password", type="password", key="_login_password")
+            submitted = st.form_submit_button(
+                "✅ เข้าสู่ระบบ", use_container_width=True, disabled=bool(locked_for)
+            )
+
+        if submitted and not locked_for:
+            record = authenticate(username, password)
+            if record:
+                start_session(record)
                 st.rerun()
-        else:
-            st.markdown("### 🔑 เข้าสู่ระบบ")
-            if auth_enabled:
-                username = st.text_input("Username", key="_login_username")
-                password = st.text_input("Password", type="password", key="_login_password")
-                if st.button("✅ Login", use_container_width=True, key="_login_btn"):
-                    record = authenticate(username, password)
-                    if not record:
-                        st.error("Username หรือ password ไม่ถูกต้อง")
-                    else:
-                        st.session_state["current_user"] = record.username
-                        st.session_state["current_user_role"] = record.role
-                        st.rerun()
             else:
-                st.caption("Demo mode: set SMARTVOICE_USERS in .env to require a password.")
-                name = st.text_input("ชื่อ-นามสกุล", key="_login_name", placeholder="เช่น สุภาพร จันทร์แก้ว")
-                role_pick = st.selectbox("บทบาท", STAFF_ROLES, key="_login_role")
-                if st.button("✅ Login", use_container_width=True, key="_login_btn"):
-                    name_clean = (name or "").strip()
-                    if not name_clean:
-                        st.error("กรุณาใส่ชื่อ")
-                    else:
-                        st.session_state["current_user"] = name_clean
-                        st.session_state["current_user_role"] = role_pick
-                        st.rerun()
+                _register_login_failure()
+                remaining = LOGIN_MAX_ATTEMPTS - st.session_state.get("_login_fail_count", 0)
+                if _login_lock_remaining():
+                    st.error(f"ผิดหลายครั้งเกินไป — ถูกล็อก {LOGIN_LOCK_SECONDS} วินาที")
+                else:
+                    st.error(
+                        f"Username หรือ Password ไม่ถูกต้อง (เหลืออีก {remaining} ครั้ง)"
+                    )
+
+        if default_admin_password_unchanged():
+            st.info(
+                "เข้าใช้งานครั้งแรก: ใช้บัญชี "
+                f"`{DEFAULT_ADMIN_USERNAME}` / `{DEFAULT_ADMIN_PASSWORD}` "
+                "แล้วเปลี่ยนรหัสผ่านทันทีที่กล่องบัญชีใน sidebar"
+            )
+
+
+def render_sidebar_account():
+    """Show who is logged in + change password / logout in the sidebar."""
+    user, role = get_current_user()
+    if not user:
+        return
+    with st.sidebar:
+        st.success(f"👤 **{user}**  \n_{role_label(role)}_")
+        render_change_password()
+        if st.button("🚪 ออกจากระบบ", use_container_width=True, key="_logout_btn"):
+            end_session()
+            st.rerun()
+        if role == "Admin" and default_admin_password_unchanged():
+            st.warning("⚠️ บัญชี `admin` ยังใช้รหัสผ่านเริ่มต้น — เปลี่ยนได้ที่ 🔐 เปลี่ยนรหัสผ่าน ด้านบน")
+
+
+def render_change_password():
+    """Self-service password change — same box on every page, for every role."""
+    with st.popover("🔐 เปลี่ยนรหัสผ่าน", use_container_width=True):
+        user_id = get_current_user_id()
+        if user_id is None:
+            # .env accounts have no `users` row to update.
+            st.caption("บัญชีนี้มาจากไฟล์ `.env` จึงเปลี่ยนรหัสผ่านจากหน้าเว็บไม่ได้")
+            return
+
+        with st.form("_change_password_form"):
+            current = st.text_input("รหัสผ่านปัจจุบัน", type="password")
+            new_password = st.text_input("รหัสผ่านใหม่", type="password")
+            confirm = st.text_input("ยืนยันรหัสผ่านใหม่", type="password")
+            submitted = st.form_submit_button("บันทึกรหัสผ่านใหม่", use_container_width=True)
+
+        if submitted:
+            error = change_password(user_id, current, new_password, confirm)
+            if error:
+                st.error(error)
+            else:
+                st.success("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว")
 
 
 def recover_stale_processing_once() -> None:
@@ -184,6 +275,30 @@ def get_current_user() -> tuple[str | None, str | None]:
     )
 
 
+def get_current_user_id() -> int | None:
+    """Row id of the logged-in user in the `users` table (None for .env accounts)."""
+    return st.session_state.get("current_user_id")
+
+
+def require_page(page_key: str) -> tuple[str, str]:
+    """Stop the page unless the logged-in role may open it.
+
+    The navigation already hides pages a role cannot use; this is the
+    server-side check that also covers hand-typed URLs and stale browser tabs.
+    """
+    user, role = get_current_user()
+    if not user:
+        st.warning("🔒 กรุณาเข้าสู่ระบบก่อนใช้งาน")
+        st.stop()
+    if not can_access(role, page_key):
+        st.error(
+            f"⛔ บทบาท **{role_label(role)}** ไม่มีสิทธิ์เข้าหน้า "
+            f"**{PAGE_LABELS_TH.get(page_key, page_key)}**"
+        )
+        st.stop()
+    return user, role
+
+
 def render_sidebar_info():
     """Render STT/LLM info in the sidebar."""
     with st.sidebar:
@@ -196,13 +311,28 @@ def render_sidebar_info():
         st.caption(f"LLM: `{OLLAMA_MODEL}`")
 
 
-def init_page():
-    """Call at the top of every page (after st.set_page_config)."""
+def bootstrap_app():
+    """Idempotent per-rerun setup, called by the Home.py router."""
     db.init_db()
+    if not st.session_state.get("_default_admin_checked"):
+        st.session_state["_default_admin_checked"] = True
+        if ensure_default_admin():
+            log.warning(
+                "No account found — seeded default admin '%s'. Change its password.",
+                DEFAULT_ADMIN_USERNAME,
+            )
     recover_stale_processing_once()
     inject_css()
-    render_login_widget()
-    render_sidebar_info()
+
+
+def init_page(page_key: str) -> tuple[str, str]:
+    """Call at the top of every page (after st.set_page_config).
+
+    Re-applies the shared CSS (each page runs in its own script slot) and
+    enforces the role permission for `page_key`. Returns (user, role).
+    """
+    inject_css()
+    return require_page(page_key)
 
 
 # ── Badge / emoji helpers ────────────────────────────────────────────────

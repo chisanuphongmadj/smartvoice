@@ -43,7 +43,7 @@
 | Customers | ลูกค้า, warranty, เคส, สายที่เชื่อมไว้ |
 | Settings | preset Demo / Real AI, แก้ `.env`, GPU auto-detect + ซ่อน `cuda` ถ้าไม่พบ, auto-apply combo เมื่อเปลี่ยน Whisper model, post-save validation, readiness checks |
 
-หน้า `Settings` ต้อง login ก่อน และจำกัด role เป็น `Admin` หรือ `Supervisor` — และตั้งใจไม่ใช้ `st.form` เพราะ form widget ไม่ fire `on_change` ทำให้ feature auto-apply combo ใช้ไม่ได้
+หน้า `Settings` จำกัด role เป็น `Admin` หรือ `Supervisor` ผ่าน `init_page(PAGE_SETTINGS)` — และตั้งใจไม่ใช้ `st.form` เพราะ form widget ไม่ fire `on_change` ทำให้ feature auto-apply combo ใช้ไม่ได้
 
 ---
 
@@ -233,7 +233,7 @@ smartvoice/
 | Path traversal | sanitize filename ก่อน save |
 | Upload abuse | จำกัด extension, magic bytes, ขนาด 100 MB |
 | Secret handling | เก็บ secret ใน `.env` |
-| Login | มี sidebar login; รองรับ PBKDF2 ผ่าน `SMARTVOICE_USERS` |
+| Login | บังคับ login ทุกหน้า; บัญชี PBKDF2 ในตาราง `users` + fallback `SMARTVOICE_USERS`; sidebar สร้างจาก `auth.visible_pages(role)` |
 | Role check | หน้า Settings จำกัดเฉพาะ `Admin` / `Supervisor` |
 | Audit trail | เก็บ `uploaded_by`, `uploaded_by_role` |
 

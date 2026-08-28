@@ -11,9 +11,10 @@ st.set_page_config(page_title="SmartVoice — Dashboard", page_icon="📊", layo
 from smartvoice import db
 from smartvoice.file_manager import extract_agent_code_from_filename
 from smartvoice.ollama_client import sanitize_evidence, sanitize_next_action
+from smartvoice.auth import PAGE_DASHBOARD
 from smartvoice.ui_helpers import init_page, metric_card, sentiment_emoji
 
-init_page()
+init_page(PAGE_DASHBOARD)
 
 # Page-scoped CSS — ขยาย caption / small text ให้อ่านง่ายขึ้น (เฉพาะหน้า Dashboard)
 st.markdown(

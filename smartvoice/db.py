@@ -100,6 +100,19 @@ def init_db() -> None:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                username       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                display_name   TEXT NOT NULL,
+                role           TEXT NOT NULL,
+                password_hash  TEXT NOT NULL,
+                is_active      INTEGER NOT NULL DEFAULT 1,
+                created_at     TEXT NOT NULL,
+                updated_at     TEXT NOT NULL,
+                last_login_at  TEXT
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS cases (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_id   INTEGER REFERENCES customers(id),
@@ -885,3 +898,139 @@ def get_previous_call_summaries_for_customer(customer_id: int, exclude_call_id: 
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Users (staff login accounts) ─────────────────────────────────────────
+#
+# Password hashes are PBKDF2-SHA256 strings produced by smartvoice.auth —
+# this module never sees a plaintext password.
+
+
+def create_user(
+    username: str,
+    display_name: str,
+    role: str,
+    password_hash: str,
+    is_active: bool = True,
+) -> int:
+    """Insert a staff account. Raises sqlite3.IntegrityError on duplicate username."""
+    now = _now()
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """
+            INSERT INTO users (
+                username, display_name, role, password_hash,
+                is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (username.strip(), display_name.strip(), role,
+             password_hash, 1 if is_active else 0, now, now),
+        )
+        new_id = cur.lastrowid
+    conn.close()
+    return new_id
+
+
+def get_user_by_username(username: str) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM users WHERE username = ? COLLATE NOCASE",
+        ((username or "").strip(),),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    conn = get_connection()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_all_users() -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM users ORDER BY is_active DESC, role, username COLLATE NOCASE"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_users() -> int:
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    conn.close()
+    return int(n)
+
+
+def count_active_admins(exclude_user_id: int | None = None) -> int:
+    """Number of enabled Admin accounts, optionally ignoring one user id."""
+    conn = get_connection()
+    query = "SELECT COUNT(*) FROM users WHERE is_active = 1 AND role = 'Admin'"
+    params: list = []
+    if exclude_user_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_user_id)
+    n = conn.execute(query, params).fetchone()[0]
+    conn.close()
+    return int(n)
+
+
+def update_user(
+    user_id: int,
+    display_name: str | None = None,
+    role: str | None = None,
+    is_active: bool | None = None,
+) -> None:
+    """Patch the editable profile fields of a user. Unset args are left as-is."""
+    fields: list[str] = []
+    params: list = []
+    if display_name is not None:
+        fields.append("display_name = ?")
+        params.append(display_name.strip())
+    if role is not None:
+        fields.append("role = ?")
+        params.append(role)
+    if is_active is not None:
+        fields.append("is_active = ?")
+        params.append(1 if is_active else 0)
+    if not fields:
+        return
+
+    fields.append("updated_at = ?")
+    params.extend([_now(), user_id])
+    conn = get_connection()
+    with conn:
+        conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", params)
+    conn.close()
+
+
+def update_user_password(user_id: int, password_hash: str) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (password_hash, _now(), user_id),
+        )
+    conn.close()
+
+
+def touch_user_login(user_id: int) -> None:
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE users SET last_login_at = ? WHERE id = ?", (_now(), user_id)
+        )
+    conn.close()
+
+
+def delete_user(user_id: int) -> int:
+    conn = get_connection()
+    with conn:
+        cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        deleted = cur.rowcount
+    conn.close()
+    return deleted

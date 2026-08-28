@@ -23,7 +23,7 @@ AI-powered Call Center Analytics สำหรับสายภาษาไท�
 - Dashboard + Admin scale-friendly สำหรับ 10K+ ไฟล์ (load-limit picker, SQL-side counts), drill-down chart สำหรับประเภทความเสียหายภายใน "แจ้งปัญหาสินค้า"
 - Filter ตามทิศทางสาย (Inbound/Outbound) บนหน้า Admin และตามรหัส Agent ใน Agent Performance
 - Settings page อัจฉริยะ — auto-detect GPU + ซ่อน `cuda` ถ้าไม่พบ, auto-apply Backend/Device/Compute ที่แนะนำเมื่อเปลี่ยน Whisper model, validate combo compatibility ก่อน save
-- มี customer/warranty view, case management, case merge, login, และ deployment readiness checks
+- มี customer/warranty view, case management, case merge, login แบบ role-based (Agent ไม่เห็นหน้า Admin), และ deployment readiness checks
 
 ## Project Structure
 
@@ -36,7 +36,7 @@ smartvoice/
 │   ├── 3_👥_Customers.py          # Customer + warranty browse
 │   └── 4_Settings.py              # Demo/AI presets + readiness checks
 ├── smartvoice/
-│   ├── auth.py                    # Sidebar login + PBKDF2 helpers
+│   ├── auth.py                    # Login, PBKDF2 hashing, role permissions
 │   ├── cli.py                     # `smartvoice` console entrypoint
 │   ├── config.py                  # Environment config ทั้งหมด
 │   ├── db.py                      # SQLite schema, migrations, CRUD
@@ -47,7 +47,7 @@ smartvoice/
 │   ├── pipeline.py                # Core orchestration
 │   ├── preflight.py               # Deployment readiness checks
 │   ├── prompts.py                 # Prompt templates
-│   ├── ui_helpers.py              # CSS, login, background processing
+│   ├── ui_helpers.py              # CSS, login page, role guard, background processing
 │   └── stt/
 │       ├── audio.py               # Load, resample, denoise
 │       ├── diarize.py             # pyannote wrapper

@@ -12,7 +12,7 @@ import requests
 from huggingface_hub import get_hf_file_metadata, hf_hub_url
 from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
 
-from smartvoice.auth import is_auth_configured
+from smartvoice.auth import default_admin_password_unchanged, is_auth_configured
 from smartvoice.config import HF_TOKEN, MOCK_STT, OLLAMA_BASE_URL, OLLAMA_MODEL
 
 
@@ -136,11 +136,15 @@ def run_preflight_checks() -> list[CheckResult]:
         "warning",
     ))
 
+    default_password = default_admin_password_unchanged()
     checks.append(CheckResult(
         "Authentication",
-        is_auth_configured(),
-        "SMARTVOICE_USERS is configured" if is_auth_configured()
-        else "SMARTVOICE_USERS is empty; sidebar login is demo/audit-only",
+        is_auth_configured() and not default_password,
+        "the bootstrap 'admin' account still uses the default password"
+        if default_password
+        else "staff accounts are configured"
+        if is_auth_configured()
+        else "no account found; open the app once to seed the bootstrap admin",
         "warning",
     ))
 

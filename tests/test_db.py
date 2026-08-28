@@ -4,6 +4,7 @@ These tests use a temporary SQLite file per test to avoid touching prod data.
 """
 
 import os
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -40,7 +41,7 @@ class TestSchema(DBTestCase):
         }
         conn.close()
         for expected in ("calls", "customers", "warranty_registrations",
-                          "call_customer_links", "cases"):
+                          "call_customer_links", "cases", "users"):
             self.assertIn(expected, tables)
 
     def test_calls_has_new_columns(self):
@@ -484,6 +485,47 @@ class TestRecoverStaleProcessing(DBTestCase):
 
         self.assertEqual(recovered, 0)
         self.assertEqual(row["status"], "processing")
+
+
+class TestUsers(DBTestCase):
+    def _make(self, username="somchai.p", role="Agent", active=True):
+        return db.create_user(username, "สมชาย", role, "hash-" + username, is_active=active)
+
+    def test_username_is_unique_case_insensitively(self):
+        self._make("somchai.p")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._make("SOMCHAI.P")
+
+    def test_get_user_by_username_ignores_case(self):
+        user_id = self._make("somchai.p")
+
+        self.assertEqual(db.get_user_by_username("SomChai.P")["id"], user_id)
+        self.assertIsNone(db.get_user_by_username("nobody"))
+
+    def test_update_user_patches_only_given_fields(self):
+        user_id = self._make("somchai.p", role="Agent")
+
+        db.update_user(user_id, role="QA")
+        row = db.get_user_by_id(user_id)
+
+        self.assertEqual(row["role"], "QA")
+        self.assertEqual(row["display_name"], "สมชาย")
+        self.assertEqual(row["is_active"], 1)
+
+    def test_count_active_admins_skips_disabled_and_excluded(self):
+        first = self._make("admin.one", role="Admin")
+        self._make("admin.two", role="Admin", active=False)
+        self._make("agent.one", role="Agent")
+
+        self.assertEqual(db.count_active_admins(), 1)
+        self.assertEqual(db.count_active_admins(exclude_user_id=first), 0)
+
+    def test_delete_user_removes_the_row(self):
+        user_id = self._make("somchai.p")
+
+        self.assertEqual(db.delete_user(user_id), 1)
+        self.assertIsNone(db.get_user_by_id(user_id))
+        self.assertEqual(db.count_users(), 0)
 
 
 if __name__ == "__main__":

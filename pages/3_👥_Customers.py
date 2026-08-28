@@ -4,9 +4,10 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Customers", page_icon="👥", layout="wide")
 
 from smartvoice import db
+from smartvoice.auth import PAGE_CUSTOMERS
 from smartvoice.ui_helpers import init_page
 
-init_page()
+init_page(PAGE_CUSTOMERS)
 
 # ─────────────────────────────────────────
 # PAGE: CUSTOMERS & WARRANTY

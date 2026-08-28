@@ -224,14 +224,37 @@ ollama serve
 
 ### 5.1 Login
 
-ใน sidebar ซ้ายมือจะมีช่อง login
+เปิดแอปแล้วจะเจอหน้า **เข้าสู่ระบบ** เต็มหน้าจอ — ยังไม่มี sidebar และเข้าหน้าอื่นไม่ได้จนกว่าจะ login สำเร็จ
 
-- **ถ้าตั้ง `SMARTVOICE_USERS` ใน `.env`:** ระบบจะถาม username + password
-- **ถ้ายังไม่ตั้ง:** ระบบเป็น **demo / audit mode** — ผู้ใช้ระบุชื่อและ role เอง (ข้อมูลถูกบันทึกใน audit trail แต่ไม่ verify)
+- ระบบตรวจ username + password กับ hash แบบ PBKDF2-SHA256 เสมอ (ไม่มีโหมดพิมพ์ชื่อเข้าเองแล้ว)
+- **role มาจากบัญชีที่เก็บไว้เท่านั้น** ผู้ใช้เลือก role เองไม่ได้
+- ใส่รหัสผิดครบ 5 ครั้ง ระบบจะล็อกช่อง login 60 วินาที
+- refresh หน้าเว็บ (F5) = ออกจากระบบ เพราะ session ผูกกับ browser session ของ Streamlit
 
-### 5.2 การสร้างผู้ใช้แบบ production
+**เข้าใช้งานครั้งแรก:** ถ้ายังไม่มีบัญชีใดในระบบ แอปจะสร้างบัญชีเริ่มต้นให้อัตโนมัติ
 
-ใช้ script ช่วย hash password:
+| Username | Password |
+|---|---|
+| `admin` | `admin1234` |
+
+> ⚠️ sidebar และหน้า readiness จะขึ้นเตือนตลอดจนกว่าจะเปลี่ยนรหัสผ่าน — เปลี่ยนได้ที่ **sidebar → กล่องบัญชี → 🔐 เปลี่ยนรหัสผ่าน** (ใช้ได้จากทุกหน้า)
+
+### 5.2 การสร้างและจัดการผู้ใช้
+
+login ด้วย role **Admin** แล้วเข้าหน้า **👤 จัดการผู้ใช้** ใน sidebar:
+
+- **เพิ่มผู้ใช้ใหม่** — username (a-z 0-9 . _ - อย่างน้อย 3 ตัว), ชื่อที่แสดง, บทบาท, รหัสผ่าน (อย่างน้อย 8 ตัว)
+- **แก้ไขบัญชี** — เปลี่ยนชื่อที่แสดง / บทบาท / ปิด-เปิดการใช้งาน
+- **รีเซ็ตรหัสผ่าน** ให้พนักงานที่ลืมรหัส
+- **ลบบัญชี** (ต้องติ๊กยืนยันก่อน)
+
+ข้อจำกัดที่ระบบบังคับให้เอง:
+
+- ต้องเหลือบัญชี Admin ที่เปิดใช้งานอย่างน้อย 1 บัญชีเสมอ
+- ลดสิทธิ์ / ปิดใช้งาน / ลบบัญชีของตัวเองไม่ได้
+- ผู้ใช้ที่ถูกปิดใช้งาน login ไม่ได้ทันที
+
+**ทางเลือกสำรอง (`.env`)** — ถ้าอยากตั้งบัญชีจากไฟล์แทน (เช่นบัญชีสำรองไว้กู้ระบบ) ยังใช้ `SMARTVOICE_USERS` ได้:
 
 ```powershell
 python scripts\make_password_hash.py admin Admin
@@ -239,25 +262,29 @@ python scripts\make_password_hash.py admin Admin
 
 จะได้ผลลัพธ์รูปแบบ:
 ```
-admin|Admin|pbkdf2_sha256$390000$xxxxxx$yyyyyyyyy...
+admin|Admin|pbkdf2_sha256$260000$xxxxxx$yyyyyyyyy...
 ```
 
-นำไปใส่ใน `.env` คั่นด้วย comma สำหรับหลายผู้ใช้:
+นำไปใส่ใน `.env` คั่นหลายผู้ใช้ด้วย `;`:
 
 ```env
-SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...,qa1|Supervisor|pbkdf2_sha256$...,qa2|QA|pbkdf2_sha256$...
+SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...;qa1|Supervisor|pbkdf2_sha256$...
 ```
+
+ระบบจะตรวจบัญชีในฐานข้อมูลก่อนเสมอ แล้วค่อยตกมาที่ `.env` — บัญชีจาก `.env` เปลี่ยนรหัสผ่านผ่านหน้าเว็บไม่ได้
 
 ### 5.3 บทบาทผู้ใช้ (Roles)
 
-| Role | สิทธิ์ |
-|---|---|
-| **Admin** | ทุกอย่าง — Upload, Process, Delete, Settings, Case management |
-| **Supervisor** | ทุกอย่างเหมือน Admin — รวมถึง Settings และ Case management |
-| **QA** | ดูข้อมูล + edit case status / subject (ไม่เข้า Settings) |
-| **Agent** | ดูได้เฉพาะส่วนที่เกี่ยวกับงานตัวเอง |
+| Role | หน้าแรก | Admin | Dashboard | Customers | Settings | จัดการผู้ใช้ |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|
+| **Admin** (ผู้ดูแลระบบ) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Supervisor** (หัวหน้างาน) | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| **QA** (ฝ่ายควบคุมคุณภาพ) | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ |
+| **Agent** (พนักงานรับสาย) | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ |
 
-ปัจจุบันการบังคับ role check ที่เข้มที่สุดอยู่ที่หน้า **Settings** ซึ่งอนุญาตเฉพาะ `Admin` / `Supervisor`
+หน้าที่ role ไม่มีสิทธิ์จะ **ไม่ปรากฏใน sidebar เลย** และถ้าพิมพ์ URL ตรง ๆ (เช่น `/admin`) ระบบจะเด้งกลับหน้าแรก — เพราะ `Home.py` สร้างเมนูจาก `auth.visible_pages(role)` และทุกหน้ายังมี `init_page(PAGE_*)` ตรวจซ้ำอีกชั้นบน server
+
+บทบาทที่ระบบไม่รู้จักจะถูกลดเป็น `Agent` (สิทธิ์ต่ำสุด) โดยอัตโนมัติ
 
 ### 5.4 Audit Trail
 
@@ -919,13 +946,17 @@ Sealy, Therapedic, King Koil, Simmons, Serta, Stearns & Foster, Synda, Satin
 
 ## 15. คำถามที่พบบ่อยและการแก้ปัญหา
 
-### 15.1 Settings เข้าไม่ได้
+### 15.1 ไม่เห็นเมนู Settings / Admin ใน sidebar
 
-**สาเหตุ:** ต้อง login + role = Admin หรือ Supervisor
+**สาเหตุ:** บัญชีที่ login อยู่เป็น role `Agent` หรือ `QA` ซึ่งไม่มีสิทธิ์เข้าสองหน้านี้ ระบบจึงซ่อนเมนูออกทั้งหมด (ดูตารางสิทธิ์ในหัวข้อ 5.3)
 
-**แก้:**
-1. Login ผ่าน sidebar
-2. ระบุ role ให้ตรง
+**แก้:** ให้ Admin เข้าหน้า **👤 จัดการผู้ใช้** แล้วเปลี่ยน role ของบัญชีนั้นเป็น `Supervisor` หรือ `Admin` จากนั้นให้ผู้ใช้ logout แล้ว login ใหม่
+
+### 15.1.1 ลืมรหัสผ่าน
+
+ให้ Admin เข้าหน้า **👤 จัดการผู้ใช้** → เลือกบัญชี → **รีเซ็ตรหัสผ่าน**
+
+ถ้าลืมรหัสของบัญชี Admin ทุกบัญชี ให้เพิ่มบัญชีสำรองผ่าน `SMARTVOICE_USERS` ใน `.env` (หัวข้อ 5.2) แล้ว restart แอป
 
 ### 15.2 ประมวลผลไม่ได้ — "Ollama not ready"
 
@@ -1090,7 +1121,7 @@ streamlit run Home.py
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | URL ของ Ollama service |
 | `OLLAMA_MODEL` | `scb10x/llama3.1-typhoon2-8b-instruct` | LLM model name |
 | `CASE_RECENCY_HOURS` | `4.0` | window สำหรับ recency short-circuit |
-| `SMARTVOICE_USERS` | _(empty)_ | รายการผู้ใช้ + password hash |
+| `SMARTVOICE_USERS` | _(empty)_ | บัญชีสำรองจากไฟล์ (ปกติใช้หน้า จัดการผู้ใช้ แทน) |
 | `PROCESSING_STALE_MINUTES` | `180` | reset สายค้างเกิน N นาที |
 | `DB_PATH` | `data/smartvoice.db` | path ของ SQLite |
 | `MAX_FILE_SIZE_MB` | `100` | จำกัดขนาดไฟล์ upload |

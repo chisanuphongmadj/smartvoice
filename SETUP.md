@@ -99,7 +99,7 @@ SMARTVOICE_USERS=
 - `MOCK_STT=true` ใช้โหมด demo โดยไม่เรียก STT จริง
 - `CASE_RECENCY_HOURS` ใช้ auto-attach สายใหม่เข้ากับเคสเปิดล่าสุดของลูกค้าคนเดิม
 - `PROCESSING_STALE_MINUTES` ใช้ reset งานที่ค้างในสถานะ `processing` หลังแอปถูกปิดกลางทาง
-- `SMARTVOICE_USERS` ถ้าว่าง ระบบจะใช้ demo/audit login; ถ้าตั้งค่าแล้วจะเปิด login แบบ password
+- `SMARTVOICE_USERS` ปล่อยว่างได้ — บัญชีผู้ใช้ปกติเก็บในฐานข้อมูลและจัดการผ่านหน้า `จัดการผู้ใช้` (ดูหัวข้อ Authentication)
 
 ### 4. เปิด Ollama
 
@@ -138,13 +138,36 @@ streamlit run Home.py
 | Customers | ดูลูกค้า, warranty, เคส, และสายที่เชื่อมไว้ |
 | Settings | preset Demo / Real AI, ปรับ model config, ดู readiness checks |
 
-หน้า `Settings` ต้อง login ก่อน และจำกัดให้ `Admin` หรือ `Supervisor`
+| จัดการผู้ใช้ | เพิ่ม/แก้ไข/ปิดใช้งานบัญชีพนักงาน, รีเซ็ตรหัสผ่าน (Admin เท่านั้น) |
+
+ต้อง login ก่อนจึงจะเห็นหน้าใด ๆ และ sidebar จะแสดงเฉพาะหน้าที่ role นั้นมีสิทธิ์:
+
+| Role | หน้าที่เข้าได้ |
+|---|---|
+| `Admin` | ทุกหน้า |
+| `Supervisor` | ทุกหน้า ยกเว้น `จัดการผู้ใช้` |
+| `QA`, `Agent` | Home, Dashboard, Customers |
 
 ---
 
 ## ตั้งค่า Authentication
 
-สร้าง hash:
+เปิดแอปครั้งแรก ระบบจะสร้างบัญชีผู้ดูแลให้อัตโนมัติ:
+
+| Username | Password |
+|---|---|
+| `admin` | `admin1234` |
+
+ขั้นตอนหลัง login ครั้งแรก:
+
+1. sidebar → กล่องบัญชี → `🔐 เปลี่ยนรหัสผ่าน` (คำเตือนใน sidebar จะหายไปเมื่อเปลี่ยนแล้ว)
+2. sidebar → `จัดการผู้ใช้` → เพิ่มบัญชีพนักงานพร้อมกำหนด role
+
+รหัสผ่านทั้งหมดถูกเก็บเป็น PBKDF2-SHA256 ในตาราง `users` ไม่มีการเก็บ plaintext
+
+### บัญชีสำรองจากไฟล์ (ไม่บังคับ)
+
+ถ้าต้องการบัญชีกู้ระบบที่ไม่ขึ้นกับฐานข้อมูล ให้สร้าง hash:
 
 ```powershell
 python scripts/make_password_hash.py admin Admin
@@ -156,7 +179,7 @@ python scripts/make_password_hash.py admin Admin
 SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 ```
 
-รองรับหลาย user โดยคั่นด้วย `;`
+รองรับหลาย user โดยคั่นด้วย `;` — ระบบจะตรวจบัญชีในฐานข้อมูลก่อน แล้วค่อยตกมาที่ `.env`
 
 ---
 

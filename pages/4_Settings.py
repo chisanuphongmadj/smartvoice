@@ -16,22 +16,15 @@ from smartvoice.env_settings import (
     validate_whisper_combo,
     write_env,
 )
+from smartvoice.auth import PAGE_SETTINGS
 from smartvoice.preflight import run_preflight_checks
-from smartvoice.ui_helpers import get_current_user, init_page
+from smartvoice.ui_helpers import init_page
 
-init_page()
+# Admin/Supervisor only (see smartvoice.auth.ROLE_PERMISSIONS).
+current_user, current_role = init_page(PAGE_SETTINGS)
 
 st.title("⚙️ Settings")
 st.caption("ปรับโหมด demo และ AI ได้จากหน้านี้ โดยไม่ต้องเปิดไฟล์ `.env` เอง")
-
-current_user, current_role = get_current_user()
-if not current_user:
-    st.warning("กรุณา login ที่ sidebar ก่อนปรับ settings")
-    st.stop()
-
-if current_role not in {"Admin", "Supervisor"}:
-    st.error("เฉพาะ Admin หรือ Supervisor เท่านั้นที่ปรับ settings ได้")
-    st.stop()
 
 values = read_env()
 

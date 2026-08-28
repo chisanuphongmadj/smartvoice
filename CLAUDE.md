@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 209 tests, must pass 100% before every commit.
+**Current test baseline:** 261 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -45,17 +45,20 @@ ollama serve
 | File | Role |
 |------|------|
 | `config.py` | Single source of truth for all env vars |
-| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)` |
+| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)` |
 | `pipeline.py` | Core orchestrator — speaker correction multi-pass, case assignment (~70 KB) |
 | `prompts.py` | All LLM prompt templates (~54 KB) |
 | `ollama_client.py` | LLM client + JSON extraction; 4 separate analysis calls. Includes `normalize_topic_detail()` for the product-issue drill-down vocabulary |
 | `file_manager.py` | Audio upload + SHA-256 deduplication. Filename helpers: `extract_phone_from_filename()`, `extract_direction_from_filename()` (Inbound/Outbound), `extract_agent_code_from_filename()` |
 | `env_settings.py` | `.env` read/write + UI helpers: `gpu_available()`, `gpu_device_name()`, `validate_whisper_combo()` (model/backend/device/compute compatibility), `recommended_combo_for_model()` (auto-apply on model change) |
-| `ui_helpers.py` | Shared CSS, badges, processing launchers |
-| `auth.py` | Streamlit login |
+| `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
+| `customer_entry.py` | Validation + insert rules for the manual data-entry page (phone normalisation, duplicate guards, warranty expiry maths) — no Streamlit import, so it is unit-testable |
+| `auth.py` | PBKDF2 hashing, DB/`.env` account lookup, role → page permission matrix (`ROLE_PERMISSIONS`, `can_access()`, `visible_pages()`) |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
 
-Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py`, `3_👥_Customers.py`, `4_Settings.py`
+`Home.py` is the router (see **Login & role-based navigation**), not just a landing page.
+
+Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py`, `3_👥_Customers.py`, `4_Settings.py`, `5_👤_Users.py`, `6_➕_Data_Entry.py`
 
 ### Speaker correction pipeline (`pipeline.py:1408-1459`)
 
@@ -152,6 +155,34 @@ Three pieces of metadata are derived from the CDR filename pattern `YYYYMMDDHHMM
 - **Agent extension** — `extract_agent_code_from_filename()` → powers the Agent dropdown filter on the Dashboard Agent Performance section. Returns the short numeric segment (2-5 digits) that isn't the 14-digit timestamp or a 10-digit Thai phone.
 
 No DB migration needed for direction/agent — derive at filter-time.
+
+## Login & role-based navigation
+
+`Home.py` is the entrypoint **router**, not a plain landing page:
+
+1. `bootstrap_app()` — init DB, seed the bootstrap admin (`admin` / `admin1234`) when no account exists anywhere, recover stale processing, inject CSS
+2. Not logged in → `st.navigation([login_page], position="hidden").run()` + `st.stop()`
+3. Logged in → `st.navigation([...auth.visible_pages(role)])`, sidebar account box, then `page.run()`
+
+**Calling `st.navigation` disables Streamlit's automatic `pages/` menu for the whole app** — that is what makes role filtering real: a page the role can't access is never in the nav, so Streamlit answers a hand-typed `/admin` URL with a redirect to the default page.
+
+Permissions live in one place, `auth.ROLE_PERMISSIONS`:
+
+| Role | home | admin | dashboard | customers | data_entry | settings | users |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| Admin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Supervisor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
+| QA | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Agent | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+Rules to keep intact:
+
+- Every page file starts with `user, role = init_page(PAGE_<KEY>)` — the server-side backstop. Never gate a page with an ad-hoc `if role in {...}` check.
+- `normalize_role()` maps anything unknown to `Agent` (least privilege), so a bad DB/`.env` value can't escalate.
+- Adding a page means: new `PAGE_*` constant + `PAGE_ORDER`/`PAGE_LABELS_TH` entry + `ROLE_PERMISSIONS` membership + `_PAGE_SPECS` route in `Home.py` + `init_page()` call in the page. `tests/test_home_entrypoint.py` fails if any of these is missed.
+- Accounts are DB-first, `.env` (`SMARTVOICE_USERS`) second. `.env` accounts have `user_id is None` and can't change their own password.
+- `auth.would_remove_last_admin()` guards the Users page — there must always be ≥1 enabled Admin.
+- Session state holds the login, so a browser refresh (F5) logs the user out. That's accepted; no cookie/JWT layer.
 
 ## Settings page behavior
 
