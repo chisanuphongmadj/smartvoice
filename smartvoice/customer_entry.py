@@ -85,8 +85,17 @@ def compute_expiry_date(
 
 # ── Validation ───────────────────────────────────────────────────────────
 
-def validate_customer(first_name: str, last_name: str, phone: str | None) -> str | None:
-    """Return an error message, or None when the customer may be created."""
+def validate_customer(
+    first_name: str,
+    last_name: str,
+    phone: str | None,
+    exclude_id: int | None = None,
+) -> str | None:
+    """Return an error message, or None when the customer may be saved.
+
+    `exclude_id` is the row being edited — its own phone must not count as a
+    duplicate of itself.
+    """
     if not clean(first_name):
         return "กรุณากรอกชื่อ"
     if not clean(last_name):
@@ -97,7 +106,7 @@ def validate_customer(first_name: str, last_name: str, phone: str | None) -> str
         if not _PHONE_RE.match(normalized):
             return "เบอร์โทรต้องขึ้นต้นด้วย 0 และมี 9-10 หลัก (เช่น 0812345678)"
         existing = db.get_customer_by_phone(normalized)
-        if existing:
+        if existing and existing["id"] != exclude_id:
             return (
                 f"เบอร์ `{normalized}` มีลูกค้าอยู่แล้ว — "
                 f"{existing['first_name']} {existing['last_name']} (id={existing['id']})"
@@ -105,8 +114,16 @@ def validate_customer(first_name: str, last_name: str, phone: str | None) -> str
     return None
 
 
-def validate_warranty(registration_no: str, customer_id: int | None) -> str | None:
-    """Return an error message, or None when the warranty may be created."""
+def validate_warranty(
+    registration_no: str,
+    customer_id: int | None,
+    exclude_id: int | None = None,
+) -> str | None:
+    """Return an error message, or None when the warranty may be saved.
+
+    `exclude_id` is the row being edited — keeping its own registration number
+    is not a duplicate.
+    """
     reg = clean(registration_no)
     if not reg:
         return "กรุณากรอกเลขทะเบียนรับประกัน"
@@ -114,12 +131,41 @@ def validate_warranty(registration_no: str, customer_id: int | None) -> str | No
         return "เลขทะเบียนใช้ได้เฉพาะ A-Z 0-9 . _ - / และยาวอย่างน้อย 3 ตัวอักษร"
     if not customer_id:
         return "กรุณาเลือกลูกค้าเจ้าของทะเบียนรับประกัน"
-    if db.get_warranty_by_registration(reg):
+    existing = db.get_warranty_by_registration(reg)
+    if existing and existing["id"] != exclude_id:
         return f"เลขทะเบียน `{reg}` มีอยู่แล้วในระบบ"
     return None
 
 
 # ── Persistence ──────────────────────────────────────────────────────────
+
+def _customer_payload(fields: dict) -> dict:
+    """Normalise raw widget values into the columns `customers` expects."""
+    payload = {key: clean(value) for key, value in fields.items()}
+    payload["first_name"] = clean(fields.get("first_name"))
+    payload["last_name"] = clean(fields.get("last_name"))
+    payload["phone"] = normalize_phone(fields.get("phone")) or None
+    payload["date_of_birth"] = _as_iso(fields.get("date_of_birth"))
+    payload["country"] = payload.get("country") or "Thailand"
+    return payload
+
+
+def _warranty_payload(fields: dict) -> dict:
+    """Normalise raw widget values into the columns `warranty_registrations` expects."""
+    payload = {
+        key: clean(value)
+        for key, value in fields.items()
+        if key not in {"customer_id", "warranty_period_months"}
+    }
+    payload["customer_id"] = int(fields["customer_id"])
+    payload["warranty_period_months"] = int(fields.get("warranty_period_months") or 0)
+    payload["date_of_purchase"] = _as_iso(fields.get("date_of_purchase"))
+    payload["date_of_delivery"] = _as_iso(fields.get("date_of_delivery"))
+    payload["expiry_date"] = _as_iso(fields.get("expiry_date")) or compute_expiry_date(
+        payload["date_of_purchase"], payload["warranty_period_months"]
+    )
+    return payload
+
 
 def create_customer(**fields) -> tuple[int | None, str | None]:
     """Validate then insert a customer. Returns (customer_id, error_message)."""
@@ -129,16 +175,8 @@ def create_customer(**fields) -> tuple[int | None, str | None]:
     if error:
         return None, error
 
-    payload = {key: clean(value) for key, value in fields.items()}
-    payload["first_name"] = clean(fields.get("first_name"))
-    payload["last_name"] = clean(fields.get("last_name"))
-    payload["phone"] = normalize_phone(fields.get("phone")) or None
-    payload["date_of_birth"] = _as_iso(fields.get("date_of_birth"))
-    payload.setdefault("country", "Thailand")
-    payload["country"] = payload.get("country") or "Thailand"
-
     try:
-        return db.insert_customer(**payload), None
+        return db.insert_customer(**_customer_payload(fields)), None
     except sqlite3.Error as exc:  # pragma: no cover - defensive
         return None, f"บันทึกไม่สำเร็จ: {exc}"
 
@@ -149,21 +187,89 @@ def create_warranty(**fields) -> tuple[int | None, str | None]:
     if error:
         return None, error
 
-    months = fields.get("warranty_period_months") or 0
-    payload = {
-        key: clean(value)
-        for key, value in fields.items()
-        if key not in {"customer_id", "warranty_period_months"}
-    }
-    payload["customer_id"] = int(fields["customer_id"])
-    payload["warranty_period_months"] = int(months)
-    payload["date_of_purchase"] = _as_iso(fields.get("date_of_purchase"))
-    payload["date_of_delivery"] = _as_iso(fields.get("date_of_delivery"))
-    payload["expiry_date"] = _as_iso(fields.get("expiry_date")) or compute_expiry_date(
-        payload["date_of_purchase"], payload["warranty_period_months"]
-    )
-
     try:
-        return db.insert_warranty(**payload), None
+        return db.insert_warranty(**_warranty_payload(fields)), None
     except sqlite3.Error as exc:  # pragma: no cover - defensive
         return None, f"บันทึกไม่สำเร็จ: {exc}"
+
+
+def update_customer(customer_id: int, **fields) -> str | None:
+    """Validate then patch an existing customer. Returns an error, or None."""
+    if not db.get_customer_by_id(customer_id):
+        return "ไม่พบลูกค้ารายนี้แล้ว — อาจถูกลบไปก่อนหน้านี้"
+
+    error = validate_customer(
+        fields.get("first_name", ""),
+        fields.get("last_name", ""),
+        fields.get("phone"),
+        exclude_id=customer_id,
+    )
+    if error:
+        return error
+
+    try:
+        db.update_customer(customer_id, **_customer_payload(fields))
+    except sqlite3.Error as exc:  # pragma: no cover - defensive
+        return f"บันทึกไม่สำเร็จ: {exc}"
+    return None
+
+
+def update_warranty(warranty_id: int, **fields) -> str | None:
+    """Validate then patch an existing warranty. Returns an error, or None."""
+    if not db.get_warranty_by_id(warranty_id):
+        return "ไม่พบทะเบียนรับประกันนี้แล้ว — อาจถูกลบไปก่อนหน้านี้"
+
+    error = validate_warranty(
+        fields.get("registration_no", ""),
+        fields.get("customer_id"),
+        exclude_id=warranty_id,
+    )
+    if error:
+        return error
+
+    try:
+        db.update_warranty(warranty_id, **_warranty_payload(fields))
+    except sqlite3.Error as exc:  # pragma: no cover - defensive
+        return f"บันทึกไม่สำเร็จ: {exc}"
+    return None
+
+
+# ── Deletion ─────────────────────────────────────────────────────────────
+
+def describe_dependencies(counts: dict[str, int]) -> str:
+    """Thai summary of what a customer delete would take with it."""
+    parts = []
+    if counts.get("warranties"):
+        parts.append(f"ทะเบียนรับประกัน {counts['warranties']} รายการ")
+    if counts.get("calls"):
+        parts.append(f"การเชื่อมสาย {counts['calls']} รายการ")
+    if counts.get("cases"):
+        parts.append(f"เคส {counts['cases']} เคส")
+    return " · ".join(parts)
+
+
+def delete_customer(customer_id: int, cascade: bool = False) -> tuple[dict, str | None]:
+    """Delete a customer. Returns (result, error_message).
+
+    Without `cascade`, a customer that still has warranties, call links or cases
+    is refused and the error names what is blocking it.
+    """
+    if not db.get_customer_by_id(customer_id):
+        return {}, "ไม่พบลูกค้ารายนี้แล้ว"
+
+    result = db.delete_customer(customer_id, cascade=cascade)
+    if not result.get("deleted"):
+        blocking = describe_dependencies(result)
+        return result, (
+            f"ลูกค้ารายนี้ยังมีข้อมูลผูกอยู่ ({blocking}) — "
+            "ติ๊กยืนยันเพื่อลบข้อมูลเหล่านี้ไปพร้อมกัน"
+        )
+    return result, None
+
+
+def delete_warranty(warranty_id: int) -> str | None:
+    """Delete a warranty registration. Returns an error, or None."""
+    if not db.get_warranty_by_id(warranty_id):
+        return "ไม่พบทะเบียนรับประกันนี้แล้ว"
+    db.delete_warranty(warranty_id)
+    return None

@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 261 tests, must pass 100% before every commit.
+**Current test baseline:** 277 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -45,14 +45,14 @@ ollama serve
 | File | Role |
 |------|------|
 | `config.py` | Single source of truth for all env vars |
-| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)` |
+| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)`. Customer/warranty edits go through `update_customer()` / `update_warranty()` (column whitelists) and `delete_customer(cascade=)` / `delete_warranty()` — see **Deleting a customer** |
 | `pipeline.py` | Core orchestrator — speaker correction multi-pass, case assignment (~70 KB) |
 | `prompts.py` | All LLM prompt templates (~54 KB) |
 | `ollama_client.py` | LLM client + JSON extraction; 4 separate analysis calls. Includes `normalize_topic_detail()` for the product-issue drill-down vocabulary |
 | `file_manager.py` | Audio upload + SHA-256 deduplication. Filename helpers: `extract_phone_from_filename()`, `extract_direction_from_filename()` (Inbound/Outbound), `extract_agent_code_from_filename()` |
 | `env_settings.py` | `.env` read/write + UI helpers: `gpu_available()`, `gpu_device_name()`, `validate_whisper_combo()` (model/backend/device/compute compatibility), `recommended_combo_for_model()` (auto-apply on model change) |
 | `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
-| `customer_entry.py` | Validation + insert rules for the manual data-entry page (phone normalisation, duplicate guards, warranty expiry maths) — no Streamlit import, so it is unit-testable |
+| `customer_entry.py` | Validation + create/update/delete rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths, dependency summary before a customer delete) — no Streamlit import, so it is unit-testable |
 | `auth.py` | PBKDF2 hashing, DB/`.env` account lookup, role → page permission matrix (`ROLE_PERMISSIONS`, `can_access()`, `visible_pages()`) |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
 
@@ -183,6 +183,21 @@ Rules to keep intact:
 - Accounts are DB-first, `.env` (`SMARTVOICE_USERS`) second. `.env` accounts have `user_id is None` and can't change their own password.
 - `auth.would_remove_last_admin()` guards the Users page — there must always be ≥1 enabled Admin.
 - Session state holds the login, so a browser refresh (F5) logs the user out. That's accepted; no cookie/JWT layer.
+
+## Deleting a customer
+
+`db.delete_customer(customer_id, cascade=False)` refuses while anything still
+references the customer and returns the dependency counts instead
+(`{"deleted": 0, "warranties": n, "calls": n, "cases": n}`). The Admin page shows
+those counts, and only the confirm checkbox turns on the `cascade=True` call.
+
+With cascade the order matters: the customer's cases are detached from their
+calls (`calls.case_id = NULL`) **before** the cases are deleted, otherwise calls
+keep pointing at case ids that no longer exist. Warranty rows and
+`call_customer_links` rows are removed too, but **the calls themselves are never
+deleted** — audio, transcript and analysis belong to the call, not to the
+customer record. `delete_warranty()` likewise nulls `call_customer_links.warranty_id`
+before removing the row.
 
 ## Settings page behavior
 

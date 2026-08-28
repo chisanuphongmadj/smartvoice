@@ -528,5 +528,112 @@ class TestUsers(DBTestCase):
         self.assertEqual(db.count_users(), 0)
 
 
+class TestCustomerAndWarrantyEditing(DBTestCase):
+    """Edit / delete paths behind the Admin data-entry page."""
+
+    def _customer(self, phone="0812345600"):
+        return db.insert_customer(first_name="มาลี", last_name="ดอกไม้", phone=phone)
+
+    def _warranty(self, customer_id, registration_no="W001OZ25001"):
+        return db.insert_warranty(
+            registration_no=registration_no,
+            customer_id=customer_id,
+            brand="Omazz",
+            model="Natura Latex",
+            date_of_purchase="2024-06-15",
+            expiry_date="2034-06-15",
+        )
+
+    def test_update_customer_patches_only_editable_columns(self):
+        customer_id = self._customer()
+        original = db.get_customer_by_id(customer_id)
+
+        updated = db.update_customer(
+            customer_id,
+            first_name="มาลี",
+            last_name="ทองดี",
+            phone="0899999999",
+            id=999,               # ignored — not editable
+            created_at="1999-01-01",  # ignored — not editable
+        )
+        row = db.get_customer_by_id(customer_id)
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(row["last_name"], "ทองดี")
+        self.assertEqual(row["phone"], "0899999999")
+        self.assertEqual(row["id"], customer_id)
+        self.assertEqual(row["created_at"], original["created_at"])
+
+    def test_update_customer_ignores_an_unknown_row(self):
+        self.assertEqual(db.update_customer(999, first_name="ไม่มี"), 0)
+
+    def test_update_warranty_can_move_it_to_another_customer(self):
+        first = self._customer()
+        second = db.insert_customer(first_name="สมชาย", last_name="ใจดี", phone="0812345601")
+        warranty_id = self._warranty(first)
+
+        db.update_warranty(warranty_id, customer_id=second, size="6ft")
+        row = db.get_warranty_by_id(warranty_id)
+
+        self.assertEqual(row["customer_id"], second)
+        self.assertEqual(row["size"], "6ft")
+
+    def test_delete_warranty_detaches_it_from_call_links(self):
+        customer_id = self._customer()
+        warranty_id = self._warranty(customer_id)
+        call_id = db.insert_call("c.wav", "hash-1", "data/raw_audio/c.wav")
+        db.link_call_customer(call_id, customer_id, warranty_id)
+
+        self.assertEqual(db.delete_warranty(warranty_id), 1)
+        self.assertIsNone(db.get_warranty_by_id(warranty_id))
+        link = db.get_call_customer_link(call_id)
+        self.assertIsNotNone(link)          # the call keeps its customer…
+        self.assertIsNone(link["warranty_id"])  # …but no longer points at the warranty
+
+    def test_delete_customer_is_refused_while_rows_still_reference_it(self):
+        customer_id = self._customer()
+        self._warranty(customer_id)
+
+        result = db.delete_customer(customer_id)
+
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(result["warranties"], 1)
+        self.assertIsNotNone(db.get_customer_by_id(customer_id))
+
+    def test_delete_customer_with_cascade_clears_dependants_but_keeps_calls(self):
+        customer_id = self._customer()
+        self._warranty(customer_id)
+        call_id = db.insert_call("c.wav", "hash-2", "data/raw_audio/c.wav")
+        db.link_call_customer(call_id, customer_id)
+        case_id = db.create_case(customer_id, "ผ้าขาด")
+        db.assign_call_to_case(call_id, case_id)
+
+        result = db.delete_customer(customer_id, cascade=True)
+
+        self.assertEqual(result["deleted"], 1)
+        self.assertEqual((result["warranties"], result["calls"], result["cases"]), (1, 1, 1))
+        self.assertIsNone(db.get_customer_by_id(customer_id))
+        self.assertEqual(db.get_warranties_by_customer(customer_id), [])
+        self.assertIsNone(db.get_call_customer_link(call_id))
+        self.assertIsNone(db.get_case_by_id(case_id))
+
+        # The call itself survives, detached from the deleted case.
+        call = db.get_call_by_id(call_id)
+        self.assertIsNotNone(call)
+        self.assertIsNone(call["case_id"])
+
+    def test_count_customer_dependencies_reports_each_kind(self):
+        customer_id = self._customer()
+        self._warranty(customer_id)
+        call_id = db.insert_call("c.wav", "hash-3", "data/raw_audio/c.wav")
+        db.link_call_customer(call_id, customer_id)
+        db.create_case(customer_id, "ผ้าขาด")
+
+        self.assertEqual(
+            db.count_customer_dependencies(customer_id),
+            {"warranties": 1, "calls": 1, "cases": 1},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

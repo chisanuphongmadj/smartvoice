@@ -495,6 +495,98 @@ def get_customer_by_id(customer_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+# Columns the Admin data-entry page may patch. `id` and `created_at` are not
+# editable — everything else on the row is.
+CUSTOMER_EDITABLE_COLUMNS = (
+    "first_name", "last_name", "phone", "email", "gender", "date_of_birth",
+    "address", "subdistrict", "district", "city_province", "country", "postcode",
+)
+
+
+def update_customer(customer_id: int, **fields) -> int:
+    """Patch editable customer columns. Unknown keys are ignored.
+
+    Returns the number of rows updated (0 when the id is unknown or nothing
+    editable was passed).
+    """
+    updates = {col: fields[col] for col in CUSTOMER_EDITABLE_COLUMNS if col in fields}
+    if not updates:
+        return 0
+    assignments = ", ".join(f"{col} = ?" for col in updates)
+    params = [*updates.values(), customer_id]
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(f"UPDATE customers SET {assignments} WHERE id = ?", params)
+        updated = cur.rowcount
+    conn.close()
+    return updated
+
+
+def count_customer_dependencies(customer_id: int) -> dict[str, int]:
+    """Rows that still reference this customer — checked before a delete."""
+    conn = get_connection()
+    counts = {
+        "warranties": conn.execute(
+            "SELECT COUNT(*) FROM warranty_registrations WHERE customer_id = ?",
+            (customer_id,),
+        ).fetchone()[0],
+        "calls": conn.execute(
+            "SELECT COUNT(*) FROM call_customer_links WHERE customer_id = ?",
+            (customer_id,),
+        ).fetchone()[0],
+        "cases": conn.execute(
+            "SELECT COUNT(*) FROM cases WHERE customer_id = ?", (customer_id,)
+        ).fetchone()[0],
+    }
+    conn.close()
+    return counts
+
+
+def delete_customer(customer_id: int, cascade: bool = False) -> dict[str, int]:
+    """Delete a customer row.
+
+    Without `cascade` the delete is refused while anything still references the
+    customer, so a mis-click cannot silently drop warranty history. With
+    `cascade` the warranty rows, call links and cases are removed first and the
+    affected calls are detached from those cases.
+
+    The calls themselves (audio, transcript, analysis) are always kept — they
+    belong to the call, not to the customer record.
+
+    Returns {"deleted": 0|1, "warranties": n, "calls": n, "cases": n} where the
+    counts are what was removed (or what blocked the delete when deleted == 0).
+    """
+    dependencies = count_customer_dependencies(customer_id)
+    if not cascade and any(dependencies.values()):
+        return {"deleted": 0, **dependencies}
+
+    conn = get_connection()
+    with conn:
+        case_ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM cases WHERE customer_id = ?", (customer_id,)
+            ).fetchall()
+        ]
+        if case_ids:
+            placeholders = ",".join("?" * len(case_ids))
+            conn.execute(
+                f"UPDATE calls SET case_id = NULL WHERE case_id IN ({placeholders})",
+                case_ids,
+            )
+        conn.execute("DELETE FROM cases WHERE customer_id = ?", (customer_id,))
+        conn.execute(
+            "DELETE FROM call_customer_links WHERE customer_id = ?", (customer_id,)
+        )
+        conn.execute(
+            "DELETE FROM warranty_registrations WHERE customer_id = ?", (customer_id,)
+        )
+        cur = conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
+        deleted = cur.rowcount
+    conn.close()
+    return {"deleted": deleted, **dependencies}
+
+
 # ─── Warranty Registrations ───────────────────────────────────────────────────
 
 def get_warranty_by_registration(registration_no: str) -> dict | None:
@@ -538,6 +630,58 @@ def insert_warranty(
         )
     conn.close()
     return cur.lastrowid
+
+
+def get_warranty_by_id(warranty_id: int) -> dict | None:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM warranty_registrations WHERE id = ?", (warranty_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# Everything on the row except `id` and `created_at` may be corrected from the
+# Admin data-entry page, including which customer the registration belongs to.
+WARRANTY_EDITABLE_COLUMNS = (
+    "registration_no", "customer_id", "channel", "certificate_no", "category",
+    "brand", "model", "size", "sku", "serial_no", "label_no",
+    "warranty_period_months", "date_of_purchase", "date_of_delivery",
+    "purchase_channel", "order_number", "expiry_date", "remark",
+)
+
+
+def update_warranty(warranty_id: int, **fields) -> int:
+    """Patch editable warranty columns. Unknown keys are ignored."""
+    updates = {col: fields[col] for col in WARRANTY_EDITABLE_COLUMNS if col in fields}
+    if not updates:
+        return 0
+    assignments = ", ".join(f"{col} = ?" for col in updates)
+    params = [*updates.values(), warranty_id]
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            f"UPDATE warranty_registrations SET {assignments} WHERE id = ?", params
+        )
+        updated = cur.rowcount
+    conn.close()
+    return updated
+
+
+def delete_warranty(warranty_id: int) -> int:
+    """Delete a warranty registration, detaching it from any call link first."""
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE call_customer_links SET warranty_id = NULL WHERE warranty_id = ?",
+            (warranty_id,),
+        )
+        cur = conn.execute(
+            "DELETE FROM warranty_registrations WHERE id = ?", (warranty_id,)
+        )
+        deleted = cur.rowcount
+    conn.close()
+    return deleted
 
 
 def get_warranties_by_customer(customer_id: int) -> list[dict]:

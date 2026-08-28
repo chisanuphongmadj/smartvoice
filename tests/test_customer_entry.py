@@ -151,6 +151,100 @@ def test_create_warranty_refuses_to_insert_when_validation_fails():
     insert.assert_not_called()
 
 
+# ── Editing ──────────────────────────────────────────────────────────────
+
+def test_validate_customer_allows_a_row_to_keep_its_own_phone():
+    itself = {"id": 7, "first_name": "มาลี", "last_name": "ดอกไม้"}
+    with mock.patch.object(customer_entry.db, "get_customer_by_phone", return_value=itself):
+        assert customer_entry.validate_customer("มาลี", "ดอกไม้", "0812345600", exclude_id=7) is None
+        # …but another customer's phone is still a duplicate.
+        assert customer_entry.validate_customer("มาลี", "ดอกไม้", "0812345600", exclude_id=9)
+
+
+def test_validate_warranty_allows_a_row_to_keep_its_own_registration_no():
+    itself = {"id": 3}
+    with mock.patch.object(customer_entry.db, "get_warranty_by_registration", return_value=itself):
+        assert customer_entry.validate_warranty("W001OZ25001", 1, exclude_id=3) is None
+        assert customer_entry.validate_warranty("W001OZ25001", 1, exclude_id=4)
+
+
+def test_update_customer_normalizes_before_saving():
+    row = {"id": 7, "first_name": "มาลี", "last_name": "ดอกไม้"}
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=row):
+        with mock.patch.object(customer_entry.db, "get_customer_by_phone", return_value=row):
+            with mock.patch.object(customer_entry.db, "update_customer") as update:
+                error = customer_entry.update_customer(
+                    7, first_name="มาลี", last_name="ดอกไม้", phone="081-234-5600", email=""
+                )
+
+    assert error is None
+    assert update.call_args.kwargs["phone"] == "0812345600"
+    assert update.call_args.kwargs["email"] is None
+
+
+def test_update_customer_reports_a_row_that_disappeared():
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=None):
+        with mock.patch.object(customer_entry.db, "update_customer") as update:
+            error = customer_entry.update_customer(7, first_name="ก", last_name="ข")
+
+    assert error
+    update.assert_not_called()
+
+
+def test_update_warranty_recomputes_expiry_when_asked():
+    with mock.patch.object(customer_entry.db, "get_warranty_by_id", return_value={"id": 3}):
+        with mock.patch.object(customer_entry.db, "get_warranty_by_registration", return_value={"id": 3}):
+            with mock.patch.object(customer_entry.db, "update_warranty") as update:
+                error = customer_entry.update_warranty(
+                    3,
+                    registration_no="W001OZ25001",
+                    customer_id=5,
+                    warranty_period_months=24,
+                    date_of_purchase=date(2025, 3, 1),
+                    expiry_date=None,
+                )
+
+    assert error is None
+    assert update.call_args.kwargs["expiry_date"] == "2027-03-01"
+
+
+# ── Deletion ─────────────────────────────────────────────────────────────
+
+def test_delete_customer_without_cascade_explains_what_is_blocking():
+    blocked = {"deleted": 0, "warranties": 2, "calls": 3, "cases": 1}
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value={"id": 7}):
+        with mock.patch.object(customer_entry.db, "delete_customer", return_value=blocked):
+            result, error = customer_entry.delete_customer(7)
+
+    assert result == blocked
+    assert error and "2" in error and "3" in error
+
+
+def test_delete_customer_with_cascade_succeeds():
+    removed = {"deleted": 1, "warranties": 2, "calls": 3, "cases": 1}
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value={"id": 7}):
+        with mock.patch.object(customer_entry.db, "delete_customer", return_value=removed) as delete:
+            result, error = customer_entry.delete_customer(7, cascade=True)
+
+    assert (result, error) == (removed, None)
+    assert delete.call_args.kwargs["cascade"] is True
+
+
+def test_delete_warranty_reports_a_row_that_disappeared():
+    with mock.patch.object(customer_entry.db, "get_warranty_by_id", return_value=None):
+        with mock.patch.object(customer_entry.db, "delete_warranty") as delete:
+            error = customer_entry.delete_warranty(3)
+
+    assert error
+    delete.assert_not_called()
+
+
+def test_describe_dependencies_lists_only_what_exists():
+    assert customer_entry.describe_dependencies({"warranties": 0, "calls": 0, "cases": 0}) == ""
+    text = customer_entry.describe_dependencies({"warranties": 1, "calls": 0, "cases": 2})
+    assert "1" in text and "2" in text and "การเชื่อมสาย" not in text
+
+
 # ── Permissions ──────────────────────────────────────────────────────────
 
 def test_only_admin_can_open_the_data_entry_page():
