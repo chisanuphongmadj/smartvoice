@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 299 tests, must pass 100% before every commit.
+**Current test baseline:** 301 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -183,6 +183,14 @@ Rules to keep intact:
 - Adding a page means: new `PAGE_*` constant + `PAGE_ORDER`/`PAGE_LABELS_TH` entry + `ROLE_PERMISSIONS` membership + `_PAGE_SPECS` route in `Home.py` + `init_page()` call in the page. `tests/test_home_entrypoint.py` fails if any of these is missed.
 - Accounts are DB-first, `.env` (`SMARTVOICE_USERS`) second. `.env` accounts have `user_id is None` and can't change their own password.
 - `auth.would_remove_last_admin()` guards the Users page — there must always be ≥1 enabled Admin.
+- **No admin-initiated password reset exists, by policy.** A password belongs to
+  its owner: only `auth.change_password()` sets one and it demands the current
+  password. An Admin's lever is the enable/disable toggle. Do not add a reset
+  helper to `auth.py` or a reset form to the Users page — `tests/test_auth.py`
+  fails if either reappears.
+- The Users page has **no delete button** either: `audit_log` rows point at those
+  accounts, so an account is disabled, never removed. `db.delete_user()` stays as
+  a maintenance-only helper that no page calls.
 - Session state holds the login, so a browser refresh (F5) logs the user out. That's accepted; no cookie/JWT layer.
 
 ## Soft delete + audit trail
@@ -215,7 +223,7 @@ readable on `pages/7_📜_Audit_Log.py` (Admin + Supervisor):
 |---|---|
 | `ui_helpers` login flow | `login`, `login_failed`, `logout`, self-service password change |
 | `customer_entry` | customer / warranty create, update, hide, restore |
-| `pages/5_👤_Users.py` | account create, role & status change, password reset, delete |
+| `pages/5_👤_Users.py` | account create, role & status change (enable/disable) |
 | `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case status/subject/merge |
 | `pages/4_Settings.py` | `.env` saves and the Quick Mode presets |
 

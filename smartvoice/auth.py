@@ -370,15 +370,12 @@ def change_password(
     return None
 
 
-def reset_password(user_id: int, new_password: str, confirm: str | None = None) -> str | None:
-    """Admin-initiated password reset for another account."""
-    error = validate_password(new_password, confirm)
-    if error:
-        return error
-    if not db.get_user_by_id(user_id):
-        return "ไม่พบบัญชีผู้ใช้นี้"
-    db.update_user_password(user_id, hash_password(new_password))
-    return None
+# NOTE: there is deliberately no admin-initiated password reset. A password
+# belongs to its owner: only `change_password` above can set one, and it demands
+# the current password. An Admin who needs to cut off access disables the
+# account instead (`db.update_user(is_active=False)`), which is auditable and
+# reversible. Do not add a reset helper here — `tests/test_auth.py` fails if one
+# reappears.
 
 
 def would_remove_last_admin(

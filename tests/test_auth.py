@@ -209,11 +209,34 @@ def test_change_password_unavailable_for_env_accounts(temp_db):
     assert error is not None and ".env" in error
 
 
-def test_reset_password_validates_length(temp_db):
+def test_no_admin_initiated_password_reset_exists(temp_db):
+    """A password belongs to its owner — an Admin can disable an account, never
+    set someone else's password. The Users page has no reset form either."""
+    from pathlib import Path
+
+    assert not hasattr(auth, "reset_password")
+
+    page = Path("pages/5_👤_Users.py").read_text(encoding="utf-8")
+    assert "reset_password" not in page
+    assert "_reset_password_form" not in page
+
+
+def test_users_page_disables_accounts_instead_of_deleting_them(temp_db):
+    """An account referenced by the audit trail must not vanish — the Admin
+    lever is the enable/disable toggle, not a hard delete."""
+    from pathlib import Path
+
+    page = Path("pages/5_👤_Users.py").read_text(encoding="utf-8")
+    assert "db.delete_user(" not in page
+    assert "เปิดใช้งานบัญชี" in page
+
+
+def test_changing_a_password_always_requires_the_current_one(temp_db):
     user_id, _ = auth.create_user("somchai.p", "staff-password", "Agent", confirm="staff-password")
 
-    assert auth.reset_password(user_id, "short", "short") is not None
-    assert auth.reset_password(user_id, "fresh-password", "fresh-password") is None
+    assert auth.change_password(user_id, "", "fresh-password", "fresh-password") is not None
+    assert auth.change_password(user_id, "wrong", "fresh-password", "fresh-password") is not None
+    assert auth.change_password(user_id, "staff-password", "fresh-password", "fresh-password") is None
     assert auth.authenticate("somchai.p", "fresh-password") is not None
 
 

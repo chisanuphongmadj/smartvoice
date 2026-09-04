@@ -14,7 +14,6 @@ from smartvoice.auth import (
     ROLES,
     create_user,
     normalize_role,
-    reset_password,
     role_label,
     visible_pages,
     would_remove_last_admin,
@@ -25,7 +24,10 @@ from smartvoice.ui_helpers import audit, get_current_user_id, init_page
 current_user, current_role = init_page(PAGE_USERS)
 
 st.title("👤 จัดการผู้ใช้")
-st.caption("เพิ่ม / แก้ไขบทบาท / รีเซ็ตรหัสผ่าน / ปิดการใช้งานบัญชีพนักงาน")
+st.caption(
+    "เพิ่มบัญชี / แก้ไขบทบาท / เปิด-ปิดใช้งาน / ลบบัญชี — "
+    "รหัสผ่านเป็นของเจ้าของบัญชีเท่านั้น ผู้ดูแลระบบตั้งหรือรีเซ็ตให้ไม่ได้"
+)
 
 _me = get_current_user_id()
 users = db.get_all_users()
@@ -120,7 +122,7 @@ selected = st.selectbox(
 )
 is_self = selected["id"] == _me
 
-edit_col, password_col = st.columns(2)
+edit_col, note_col = st.columns(2)
 
 with edit_col:
     st.markdown("**บทบาทและสถานะ**")
@@ -180,48 +182,24 @@ with edit_col:
             st.success("บันทึกเรียบร้อยแล้ว")
             st.rerun()
 
-with password_col:
-    st.markdown("**รีเซ็ตรหัสผ่าน**")
-    with st.form("_reset_password_form"):
-        reset_pw = st.text_input("รหัสผ่านใหม่", type="password")
-        reset_confirm = st.text_input("ยืนยันรหัสผ่านใหม่", type="password")
-        reset_submitted = st.form_submit_button("รีเซ็ตรหัสผ่าน", use_container_width=True)
-
-    if reset_submitted:
-        error = reset_password(selected["id"], reset_pw, reset_confirm)
-        if error:
-            st.error(error)
-        else:
-            audit(
-                audit_trail.UPDATE,
-                audit_trail.ENTITY_USER,
-                entity_id=selected["id"],
-                entity_label=selected["username"],
-                changes={"password": "รีเซ็ตโดยผู้ดูแลระบบ"},
-            )
-            st.success(f"รีเซ็ตรหัสผ่านของ `{selected['username']}` เรียบร้อยแล้ว")
-
-st.markdown("**ลบบัญชี**")
-if is_self:
-    st.caption("ไม่สามารถลบบัญชีของตัวเองได้")
-else:
-    confirm_delete = st.checkbox(
-        f"ยืนยันการลบบัญชี `{selected['username']}` อย่างถาวร", key="_confirm_delete_user"
+with note_col:
+    # Admins deliberately cannot read, set or reset anyone else's password —
+    # only the account owner can change it. The lever an Admin has is the
+    # enable/disable toggle on the left.
+    st.markdown("**รหัสผ่าน**")
+    st.info(
+        "ผู้ดูแลระบบ **ไม่มีสิทธิ์** ตั้งหรือรีเซ็ตรหัสผ่านของพนักงาน — "
+        "เจ้าของบัญชีเท่านั้นที่เปลี่ยนรหัสผ่านตัวเองได้ ที่กล่องบัญชีใน sidebar "
+        "(ต้องกรอกรหัสผ่านเดิมก่อนเสมอ)"
     )
-    if st.button("🗑 ลบบัญชี", disabled=not confirm_delete):
-        if would_remove_last_admin(selected["id"], new_active=False):
-            st.error("ต้องมีบัญชี Admin ที่ใช้งานได้อย่างน้อย 1 บัญชีเสมอ")
-        else:
-            db.delete_user(selected["id"])
-            audit(
-                audit_trail.DELETE,
-                audit_trail.ENTITY_USER,
-                entity_id=selected["id"],
-                entity_label=selected["username"],
-                changes={
-                    "role": normalize_role(selected["role"]),
-                    "display_name": selected["display_name"],
-                },
-            )
-            st.success(f"ลบบัญชี `{selected['username']}` แล้ว")
-            st.rerun()
+    st.caption(
+        "พนักงานลืมรหัสผ่าน: ปิดใช้งานบัญชีเดิมเพื่อกันการเข้าถึง แล้วสร้างบัญชีใหม่ให้ "
+        "โดยให้เจ้าตัวตั้งรหัสผ่านเองทันทีที่เข้าใช้งานครั้งแรก"
+    )
+
+st.markdown("**เลิกใช้งานบัญชี**")
+st.caption(
+    "ระบบไม่มีปุ่มลบบัญชีถาวร — บัญชีที่ถูกลบจะทำให้รายการใน 📜 ประวัติการใช้งาน "
+    "ชี้ไปยังผู้ใช้ที่ไม่มีอยู่แล้ว ใช้การปิดใช้งานด้านบนแทน: "
+    "บัญชีที่ปิดอยู่จะเข้าสู่ระบบไม่ได้ทันที และเปิดกลับมาได้ภายหลัง"
+)

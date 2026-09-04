@@ -138,7 +138,7 @@ streamlit run Home.py
 | Customers | ดูลูกค้า, warranty, เคส, และสายที่เชื่อมไว้ |
 | Settings | preset Demo / Real AI, ปรับ model config, ดู readiness checks |
 
-| จัดการผู้ใช้ | เพิ่ม/แก้ไข/ปิดใช้งานบัญชีพนักงาน, รีเซ็ตรหัสผ่าน (Admin เท่านั้น) |
+| จัดการผู้ใช้ | เพิ่ม/แก้บทบาท/เปิด-ปิดใช้งานบัญชีพนักงาน (Admin เท่านั้น) — ตั้งหรือรีเซ็ตรหัสผ่านของคนอื่นไม่ได้ |
 
 ต้อง login ก่อนจึงจะเห็นหน้าใด ๆ และ sidebar จะแสดงเฉพาะหน้าที่ role นั้นมีสิทธิ์:
 
@@ -241,7 +241,7 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-สถานะล่าสุดที่ยืนยันแล้ว: `145 passed` (ทดสอบเมื่อ 2026-05-20)
+สถานะล่าสุดที่ยืนยันแล้ว: `301 passed` (ทดสอบเมื่อ 2026-09-04)
 
 ---
 
