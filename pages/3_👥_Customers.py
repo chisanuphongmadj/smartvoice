@@ -14,6 +14,14 @@ init_page(PAGE_CUSTOMERS)
 # ─────────────────────────────────────────
 st.title("Customers & Warranty")
 
+# Same status wording as the Admin page, so one call reads the same everywhere.
+_STATUS_LABEL = {
+    "uploaded": "รอประมวลผล",
+    "processing": "กำลังประมวลผล",
+    "done": "เสร็จแล้ว",
+    "error": "ผิดพลาด",
+}
+
 tab1, tab2 = st.tabs(["ลูกค้า", "ทะเบียนรับประกัน"])
 
 with tab1:
@@ -80,10 +88,15 @@ with tab1:
                         st.caption(f"สร้าง: {created}  •  อัปเดทล่าสุด: {updated}")
                         if case_calls:
                             for oc in case_calls:
+                                # The summary goes on its own line, in full: Thai has
+                                # no spaces between words, so any character cut lands
+                                # mid-word (every summary in the DB is 130-330 chars).
                                 st.markdown(
-                                    f"- `{oc['filename']}`  "
-                                    f"({oc['status']}) — {(oc.get('summary') or '—')[:100]}"
+                                    f"- `{oc['filename']}` "
+                                    f"({_STATUS_LABEL.get(oc['status'], oc['status'])})"
                                 )
+                                if oc.get("summary"):
+                                    st.caption(oc["summary"])
 
             # ── Calls linked to this customer (even without a case) ──
             all_calls = db.get_calls_by_customer(c["id"])
@@ -93,7 +106,10 @@ with tab1:
                     st.markdown(f"**สายที่เชื่อมไว้แต่ยังไม่มีเคส ({len(linked_no_case)}):**")
                     for cl in linked_no_case:
                         _badge = "จับคู่อัตโนมัติ" if cl.get("matched_by") == "auto_phone" else "จับคู่เอง"
-                        st.caption(f"- `{cl['filename']}` ({cl['status']}) {_badge}")
+                        st.caption(
+                            f"- `{cl['filename']}` "
+                            f"({_STATUS_LABEL.get(cl['status'], cl['status'])}) {_badge}"
+                        )
 
 with tab2:
     warranties = db.get_all_warranties()

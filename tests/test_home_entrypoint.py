@@ -68,6 +68,15 @@ def test_home_does_not_run_network_readiness_checks_on_every_rerun():
     assert "checks = run_preflight_checks()" not in home
 
 
+def test_thai_summaries_are_not_cut_at_a_fixed_character_count():
+    """Thai has no spaces between words, so slicing a summary always cuts
+    mid-word — and every summary in the database is longer than 100 chars."""
+    page = Path("pages/3_👥_Customers.py").read_text(encoding="utf-8")
+
+    assert "summary') or '—')[:100]" not in page
+    assert 'st.caption(oc["summary"])' in page
+
+
 def test_router_uses_st_navigation_so_pages_dir_menu_is_disabled():
     home = Path("Home.py").read_text(encoding="utf-8")
 
