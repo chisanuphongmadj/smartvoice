@@ -43,6 +43,12 @@ bootstrap_app()
 
 # ── Home page ────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_preflight_checks():
+    """Readiness checks, cached for 5 minutes — they hit the network."""
+    return run_preflight_checks()
+
+
 def home_page():
     st.title("Thai Call Analytics")
     st.markdown("**AI-powered Call Center Analytics for Thai Customer Calls** — transcribes Thai audio, diarizes speakers, and runs LLM quality analysis.")
@@ -52,28 +58,37 @@ def home_page():
 
     st.divider()
 
-    # Quick stats
-    calls = db.get_all_calls()
-    total = len(calls)
-    done = sum(1 for c in calls if c["status"] == "done")
-    processing = sum(1 for c in calls if c["status"] == "processing")
-    pending = sum(1 for c in calls if c["status"] == "uploaded")
+    # Quick stats — counted with a single SQL GROUP BY. Loading the rows to
+    # count them in Python would drag every transcript along with them: ~300 ms
+    # and ~57 MB per page view at 5,000 calls, growing linearly from there.
+    counts = db.count_calls_by_status()
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.markdown(metric_card(total, "Total Calls"), unsafe_allow_html=True)
+        st.markdown(metric_card(counts["total"], "สายทั้งหมด"), unsafe_allow_html=True)
     with col2:
-        st.markdown(metric_card(done, "Done", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(metric_card(counts["done"], "เสร็จแล้ว", "#22c55e"), unsafe_allow_html=True)
     with col3:
-        st.markdown(metric_card(processing, "Processing", "#3b82f6"), unsafe_allow_html=True)
+        st.markdown(
+            metric_card(counts["processing"], "กำลังประมวลผล", "#3b82f6"), unsafe_allow_html=True
+        )
     with col4:
-        st.markdown(metric_card(pending, "Pending", "#eab308"), unsafe_allow_html=True)
+        st.markdown(
+            metric_card(counts["uploaded"], "รอประมวลผล", "#eab308"), unsafe_allow_html=True
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.info("เลือกหน้าจาก sidebar เพื่อเริ่มใช้งาน")
 
     with st.expander("Deployment readiness", expanded=False):
-        checks = run_preflight_checks()
+        # Streamlit runs an expander's body even while it is collapsed, and these
+        # checks call out to Ollama and HuggingFace over the network (~2.6 s).
+        # Cached so opening the home page doesn't pay for them every rerun.
+        col_refresh, _ = st.columns([1, 3])
+        if col_refresh.button("ตรวจสอบใหม่", key="_refresh_preflight"):
+            _cached_preflight_checks.clear()
+
+        checks = _cached_preflight_checks()
         for check in checks:
             if check.ok:
                 st.success(f"{check.name}: {check.detail}")

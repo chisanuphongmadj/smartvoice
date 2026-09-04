@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 302 tests, must pass 100% before every commit.
+**Current test baseline:** 304 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -140,10 +140,11 @@ Anomaly = escalation-worthy event, NOT just negative sentiment. Every flag requi
 
 Normal complaints resolved politely = negative sentiment, **not** anomaly.
 
-## Scale-friendly Admin / Dashboard
+## Scale-friendly Home / Admin / Dashboard
 
-Both pages cap row loading so they stay responsive at 10K+ uploads:
+These pages avoid loading rows they don't display, so they stay responsive at 10K+ uploads:
 
+- **Home** (`Home.py`): the four cards come from `count_calls_by_status()`. Counting with `get_all_calls()` (a `SELECT *`) pulled every transcript into memory — measured ~278 ms and ~57 MB per page view at 5,000 calls. The readiness checks are wrapped in `@st.cache_data(ttl=300)` because an expander body runs even while collapsed and those checks hit Ollama/HuggingFace over the network (~2.6 s); together this took a home render from 2.9 s to 0.2 s at 5,000 calls.
 - **Admin** (`pages/1_📤_Admin.py`): top metric cards read from `count_calls_by_status()` (SQL `GROUP BY`) so they're accurate even when only the latest-N rows are loaded for display. Load-limit picker defaults to `200 ล่าสุด` when total > 200, else `ทั้งหมด`. "Process All Pending" uses `get_pending_call_ids()` (lazy) so old pending calls aren't missed. The `@st.fragment(run_every=3)` auto-refresh queries only `get_processing_calls()` (typically 0-1 rows) instead of the full table.
 - **Dashboard** (`pages/2_📊_Dashboard.py`): load-limit picker defaults to `1,000 ล่าสุด` when total > 1000, else `ทั้งหมด`. Analytics signal quality matters more here than first-paint speed, so the default is larger than on Admin.
 

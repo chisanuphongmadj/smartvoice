@@ -48,6 +48,26 @@ def test_ui_labels_are_words_not_decorative_icons():
     assert not offenders, "decorative icons left in the UI:\n" + "\n".join(offenders)
 
 
+def test_home_counts_calls_in_sql_instead_of_loading_the_table():
+    """`get_all_calls()` is SELECT * — counting with it drags every transcript
+    into memory on each page view (~57 MB at 5,000 calls)."""
+    home = Path("Home.py").read_text(encoding="utf-8")
+
+    assert "count_calls_by_status()" in home
+    assert "db.get_all_calls()" not in home
+
+
+def test_home_does_not_run_network_readiness_checks_on_every_rerun():
+    """An expander's body runs even while collapsed, and these checks call
+    Ollama and HuggingFace (~2.6 s), so they have to be cached."""
+    home = Path("Home.py").read_text(encoding="utf-8")
+
+    assert "@st.cache_data" in home
+    assert "_cached_preflight_checks()" in home
+    # the uncached call must not be left in the page body
+    assert "checks = run_preflight_checks()" not in home
+
+
 def test_router_uses_st_navigation_so_pages_dir_menu_is_disabled():
     home = Path("Home.py").read_text(encoding="utf-8")
 

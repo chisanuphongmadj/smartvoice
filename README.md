@@ -173,4 +173,4 @@ Audio (.wav/.mp3)
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-ผลล่าสุดที่ยืนยันแล้ว: `302 passed` (ทดสอบเมื่อ 2026-09-04)
+ผลล่าสุดที่ยืนยันแล้ว: `304 passed` (ทดสอบเมื่อ 2026-09-04)
