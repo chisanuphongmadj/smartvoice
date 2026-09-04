@@ -54,6 +54,7 @@ PAGE_ADMIN = "admin"
 PAGE_DASHBOARD = "dashboard"
 PAGE_CUSTOMERS = "customers"
 PAGE_DATA_ENTRY = "data_entry"
+PAGE_AUDIT = "audit"
 PAGE_SETTINGS = "settings"
 PAGE_USERS = "users"
 
@@ -64,6 +65,7 @@ PAGE_ORDER = (
     PAGE_DASHBOARD,
     PAGE_CUSTOMERS,
     PAGE_DATA_ENTRY,
+    PAGE_AUDIT,
     PAGE_SETTINGS,
     PAGE_USERS,
 )
@@ -74,6 +76,7 @@ PAGE_LABELS_TH = {
     PAGE_DASHBOARD: "Dashboard",
     PAGE_CUSTOMERS: "ลูกค้า & การรับประกัน",
     PAGE_DATA_ENTRY: "เพิ่มลูกค้า & ทะเบียนรับประกัน",
+    PAGE_AUDIT: "ประวัติการใช้งาน (Audit log)",
     PAGE_SETTINGS: "ตั้งค่าระบบ",
     PAGE_USERS: "จัดการผู้ใช้",
 }
@@ -89,12 +92,13 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PAGE_DASHBOARD,
             PAGE_CUSTOMERS,
             PAGE_DATA_ENTRY,
+            PAGE_AUDIT,
             PAGE_SETTINGS,
             PAGE_USERS,
         }
     ),
     "Supervisor": frozenset(
-        {PAGE_HOME, PAGE_ADMIN, PAGE_DASHBOARD, PAGE_CUSTOMERS, PAGE_SETTINGS}
+        {PAGE_HOME, PAGE_ADMIN, PAGE_DASHBOARD, PAGE_CUSTOMERS, PAGE_AUDIT, PAGE_SETTINGS}
     ),
     "QA": frozenset({PAGE_HOME, PAGE_DASHBOARD, PAGE_CUSTOMERS}),
     "Agent": frozenset({PAGE_HOME, PAGE_DASHBOARD, PAGE_CUSTOMERS}),

@@ -16,9 +16,10 @@ from smartvoice.env_settings import (
     validate_whisper_combo,
     write_env,
 )
+from smartvoice import audit as audit_trail
 from smartvoice.auth import PAGE_SETTINGS
 from smartvoice.preflight import run_preflight_checks
-from smartvoice.ui_helpers import init_page
+from smartvoice.ui_helpers import audit, init_page
 
 # Admin/Supervisor only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_SETTINGS)
@@ -37,11 +38,19 @@ with mode_col:
     with c1:
         if st.button("Use Demo Laptop Mode", use_container_width=True):
             write_env(DEMO_PRESET)
+            audit(
+                audit_trail.UPDATE, audit_trail.ENTITY_SETTINGS,
+                entity_label="Demo Laptop Mode", changes=dict(DEMO_PRESET),
+            )
             st.success("Saved demo mode. Restart the app to apply all settings.")
             st.rerun()
     with c2:
         if st.button("Use Real AI Mode", use_container_width=True):
             write_env(REAL_AI_PRESET)
+            audit(
+                audit_trail.UPDATE, audit_trail.ENTITY_SETTINGS,
+                entity_label="Real AI Mode", changes=dict(REAL_AI_PRESET),
+            )
             st.success("Saved real AI mode. Add HF token if needed, then restart.")
             st.rerun()
 
@@ -204,7 +213,14 @@ if submitted:
     elif hf_token.strip():
         updates["HF_TOKEN"] = hf_token.strip()
 
+    # HF_TOKEN is redacted by smartvoice.audit before it reaches the log.
+    changed = audit_trail.diff_fields(values, updates)
     write_env(updates)
+    if changed:
+        audit(
+            audit_trail.UPDATE, audit_trail.ENTITY_SETTINGS,
+            entity_label="Save Settings", changes=changed,
+        )
     st.success("Saved to `.env`. Restart the app with `run.bat` so every module uses the new settings.")
 
     # Run combo validation after save so the user sees actionable feedback

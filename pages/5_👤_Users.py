@@ -5,6 +5,7 @@ import streamlit as st
 
 st.set_page_config(page_title="SmartVoice — Users", page_icon="👤", layout="wide")
 
+from smartvoice import audit as audit_trail
 from smartvoice import db
 from smartvoice.auth import (
     PAGE_LABELS_TH,
@@ -18,7 +19,7 @@ from smartvoice.auth import (
     visible_pages,
     would_remove_last_admin,
 )
-from smartvoice.ui_helpers import get_current_user_id, init_page
+from smartvoice.ui_helpers import audit, get_current_user_id, init_page
 
 # Admin only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_USERS)
@@ -80,7 +81,7 @@ with st.form("_add_user_form"):
     add_submitted = st.form_submit_button("สร้างบัญชี")
 
 if add_submitted:
-    _, error = create_user(
+    new_user_id, error = create_user(
         username=new_username,
         password=new_password,
         role=new_role,
@@ -90,6 +91,16 @@ if add_submitted:
     if error:
         st.error(error)
     else:
+        audit(
+            audit_trail.CREATE,
+            audit_trail.ENTITY_USER,
+            entity_id=new_user_id,
+            entity_label=new_username.strip(),
+            changes={
+                "role": normalize_role(new_role),
+                "display_name": (new_display or "").strip() or new_username.strip(),
+            },
+        )
         st.success(f"สร้างบัญชี `{new_username.strip()}` เรียบร้อยแล้ว")
         st.rerun()
 
@@ -113,16 +124,23 @@ edit_col, password_col = st.columns(2)
 
 with edit_col:
     st.markdown("**บทบาทและสถานะ**")
-    edit_display = st.text_input("ชื่อที่แสดง", value=selected["display_name"], key="_edit_display")
+    # Widget keys carry the account id: with a fixed key Streamlit keeps the
+    # value from the previously selected account and ignores `value=`, so
+    # switching accounts would save the wrong display name / role.
+    edit_display = st.text_input(
+        "ชื่อที่แสดง", value=selected["display_name"], key=f"_edit_display_{selected['id']}"
+    )
     edit_role = st.selectbox(
         "บทบาท",
         ROLES,
         index=ROLES.index(normalize_role(selected["role"])),
         format_func=lambda r: f"{r} ({ROLE_LABELS_TH[r]})",
-        key="_edit_role",
+        key=f"_edit_role_{selected['id']}",
     )
     edit_active = st.toggle(
-        "เปิดใช้งานบัญชี", value=bool(selected["is_active"]), key="_edit_active"
+        "เปิดใช้งานบัญชี",
+        value=bool(selected["is_active"]),
+        key=f"_edit_active_{selected['id']}",
     )
     if is_self:
         st.caption("นี่คือบัญชีของคุณเอง — ไม่สามารถลดบทบาทหรือปิดใช้งานตัวเองได้")
@@ -133,12 +151,32 @@ with edit_col:
         elif would_remove_last_admin(selected["id"], new_role=edit_role, new_active=edit_active):
             st.error("ต้องมีบัญชี Admin ที่ใช้งานได้อย่างน้อย 1 บัญชีเสมอ")
         else:
+            changes = audit_trail.diff_fields(
+                {
+                    "display_name": selected["display_name"],
+                    "role": normalize_role(selected["role"]),
+                    "is_active": bool(selected["is_active"]),
+                },
+                {
+                    "display_name": edit_display.strip(),
+                    "role": normalize_role(edit_role),
+                    "is_active": bool(edit_active),
+                },
+            )
             db.update_user(
                 selected["id"],
                 display_name=edit_display,
                 role=normalize_role(edit_role),
                 is_active=edit_active,
             )
+            if changes:
+                audit(
+                    audit_trail.UPDATE,
+                    audit_trail.ENTITY_USER,
+                    entity_id=selected["id"],
+                    entity_label=selected["username"],
+                    changes=changes,
+                )
             st.success("บันทึกเรียบร้อยแล้ว")
             st.rerun()
 
@@ -154,6 +192,13 @@ with password_col:
         if error:
             st.error(error)
         else:
+            audit(
+                audit_trail.UPDATE,
+                audit_trail.ENTITY_USER,
+                entity_id=selected["id"],
+                entity_label=selected["username"],
+                changes={"password": "รีเซ็ตโดยผู้ดูแลระบบ"},
+            )
             st.success(f"รีเซ็ตรหัสผ่านของ `{selected['username']}` เรียบร้อยแล้ว")
 
 st.markdown("**ลบบัญชี**")
@@ -168,5 +213,15 @@ else:
             st.error("ต้องมีบัญชี Admin ที่ใช้งานได้อย่างน้อย 1 บัญชีเสมอ")
         else:
             db.delete_user(selected["id"])
+            audit(
+                audit_trail.DELETE,
+                audit_trail.ENTITY_USER,
+                entity_id=selected["id"],
+                entity_label=selected["username"],
+                changes={
+                    "role": normalize_role(selected["role"]),
+                    "display_name": selected["display_name"],
+                },
+            )
             st.success(f"ลบบัญชี `{selected['username']}` แล้ว")
             st.rerun()

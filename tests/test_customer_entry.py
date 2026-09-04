@@ -8,6 +8,19 @@ import pytest
 from smartvoice import auth, customer_entry
 
 
+@pytest.fixture(autouse=True)
+def audit(monkeypatch):
+    """Capture audit rows instead of writing them to the real database."""
+    entries: list[dict] = []
+
+    def _capture(**kwargs):
+        entries.append(kwargs)
+        return len(entries)
+
+    monkeypatch.setattr(customer_entry.db, "log_action", _capture)
+    return entries
+
+
 # ── Phone normalisation ──────────────────────────────────────────────────
 
 @pytest.mark.parametrize(
@@ -208,41 +221,147 @@ def test_update_warranty_recomputes_expiry_when_asked():
     assert update.call_args.kwargs["expiry_date"] == "2027-03-01"
 
 
-# ── Deletion ─────────────────────────────────────────────────────────────
+# ── Hiding & restoring ───────────────────────────────────────────────────
 
-def test_delete_customer_without_cascade_explains_what_is_blocking():
-    blocked = {"deleted": 0, "warranties": 2, "calls": 3, "cases": 1}
-    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value={"id": 7}):
-        with mock.patch.object(customer_entry.db, "delete_customer", return_value=blocked):
-            result, error = customer_entry.delete_customer(7)
+def test_hide_customer_soft_deletes_and_records_who_did_it(audit):
+    hidden = {"customer": 1, "warranties": 2, "deleted_at": "2026-09-04T10:00:00+00:00"}
+    row = {"id": 7, "first_name": "มาลี", "last_name": "ดอกไม้"}
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=row):
+        with mock.patch.object(customer_entry.db, "count_customer_dependencies",
+                               return_value={"warranties": 2, "calls": 3, "cases": 1}):
+            with mock.patch.object(customer_entry.db, "soft_delete_customer",
+                                   return_value=hidden) as soft_delete:
+                result, error = customer_entry.hide_customer(7, actor="admin", actor_role="Admin")
 
-    assert result == blocked
-    assert error and "2" in error and "3" in error
-
-
-def test_delete_customer_with_cascade_succeeds():
-    removed = {"deleted": 1, "warranties": 2, "calls": 3, "cases": 1}
-    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value={"id": 7}):
-        with mock.patch.object(customer_entry.db, "delete_customer", return_value=removed) as delete:
-            result, error = customer_entry.delete_customer(7, cascade=True)
-
-    assert (result, error) == (removed, None)
-    assert delete.call_args.kwargs["cascade"] is True
+    assert (result, error) == (hidden, None)
+    assert soft_delete.call_args.kwargs["actor"] == "admin"
+    assert audit[-1]["action"] == "delete"
+    assert audit[-1]["actor"] == "admin"
+    assert audit[-1]["entity_label"] == "มาลี ดอกไม้"
 
 
-def test_delete_warranty_reports_a_row_that_disappeared():
-    with mock.patch.object(customer_entry.db, "get_warranty_by_id", return_value=None):
-        with mock.patch.object(customer_entry.db, "delete_warranty") as delete:
-            error = customer_entry.delete_warranty(3)
+def test_hide_customer_reports_a_row_already_hidden():
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=None):
+        with mock.patch.object(customer_entry.db, "soft_delete_customer") as soft_delete:
+            result, error = customer_entry.hide_customer(7)
 
     assert error
-    delete.assert_not_called()
+    soft_delete.assert_not_called()
+
+
+def test_restore_customer_logs_the_restore(audit):
+    row = {"id": 7, "first_name": "มาลี", "last_name": "ดอกไม้", "deleted_at": "..."}
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=row):
+        with mock.patch.object(customer_entry.db, "restore_customer",
+                               return_value={"customer": 1, "warranties": 2}):
+            result, error = customer_entry.restore_customer(7, actor="admin", actor_role="Admin")
+
+    assert error is None and result["warranties"] == 2
+    assert audit[-1]["action"] == "restore"
+    assert audit[-1]["changes"] == {"restored_warranties": 2}
+
+
+def test_restore_warranty_refuses_while_its_customer_is_still_hidden():
+    row = {"id": 3, "registration_no": "W001OZ25001", "customer_id": 7}
+    with mock.patch.object(customer_entry.db, "get_warranty_by_id", return_value=row):
+        with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=None):
+            with mock.patch.object(customer_entry.db, "restore_warranty") as restore:
+                error = customer_entry.restore_warranty(3)
+
+    assert error and "ลูกค้า" in error
+    restore.assert_not_called()
+
+
+def test_hide_warranty_reports_a_row_that_disappeared():
+    with mock.patch.object(customer_entry.db, "get_warranty_by_id", return_value=None):
+        with mock.patch.object(customer_entry.db, "soft_delete_warranty") as soft_delete:
+            error = customer_entry.hide_warranty(3)
+
+    assert error
+    soft_delete.assert_not_called()
+
+
+def test_a_hidden_phone_points_the_user_at_restore_instead_of_a_duplicate_error():
+    hidden = {
+        "id": 7, "first_name": "มาลี", "last_name": "ดอกไม้",
+        "deleted_at": "2026-09-04T10:00:00+00:00",
+    }
+    with mock.patch.object(customer_entry.db, "get_customer_by_phone", return_value=hidden):
+        error = customer_entry.validate_customer("สมชาย", "ใจดี", "0812345600")
+
+    assert error and "ซ่อน" in error and "กู้คืน" in error
+
+
+def test_a_hidden_registration_no_points_the_user_at_restore():
+    hidden = {"id": 3, "deleted_at": "2026-09-04T10:00:00+00:00"}
+    with mock.patch.object(customer_entry.db, "get_warranty_by_registration", return_value=hidden):
+        error = customer_entry.validate_warranty("W001OZ25001", 5)
+
+    assert error and "ซ่อน" in error and "กู้คืน" in error
 
 
 def test_describe_dependencies_lists_only_what_exists():
     assert customer_entry.describe_dependencies({"warranties": 0, "calls": 0, "cases": 0}) == ""
     text = customer_entry.describe_dependencies({"warranties": 1, "calls": 0, "cases": 2})
     assert "1" in text and "2" in text and "การเชื่อมสาย" not in text
+
+
+# ── Audit trail ──────────────────────────────────────────────────────────
+
+def test_create_customer_writes_an_audit_entry(audit):
+    with mock.patch.object(customer_entry.db, "get_customer_by_phone", return_value=None):
+        with mock.patch.object(customer_entry.db, "insert_customer", return_value=42):
+            customer_entry.create_customer(
+                actor="admin", actor_role="Admin",
+                first_name="สมชาย", last_name="ใจดี", phone="0812345678",
+            )
+
+    entry = audit[-1]
+    assert entry["action"] == "create"
+    assert entry["entity"] == customer_entry.ENTITY_CUSTOMER
+    assert entry["entity_id"] == 42
+    assert entry["changes"]["phone"] == "0812345678"
+
+
+def test_update_customer_logs_only_the_fields_that_changed(audit):
+    before = {
+        "id": 7, "first_name": "มาลี", "last_name": "ดอกไม้", "phone": "0812345600",
+        "email": None, "country": "Thailand",
+    }
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=before):
+        with mock.patch.object(customer_entry.db, "get_customer_by_phone", return_value=before):
+            with mock.patch.object(customer_entry.db, "update_customer"):
+                customer_entry.update_customer(
+                    7, actor="admin", actor_role="Admin",
+                    first_name="มาลี", last_name="ทองดี", phone="0812345600",
+                )
+
+    assert audit[-1]["changes"] == {"last_name": ["ดอกไม้", "ทองดี"]}
+
+
+def test_an_update_that_changes_nothing_is_not_logged(audit):
+    before = {
+        "id": 7, "first_name": "มาลี", "last_name": "ดอกไม้", "phone": "0812345600",
+        "country": "Thailand",
+    }
+    with mock.patch.object(customer_entry.db, "get_customer_by_id", return_value=before):
+        with mock.patch.object(customer_entry.db, "get_customer_by_phone", return_value=before):
+            with mock.patch.object(customer_entry.db, "update_customer") as update:
+                error = customer_entry.update_customer(
+                    7, first_name="มาลี", last_name="ดอกไม้", phone="0812345600",
+                )
+
+    assert error is None
+    update.assert_not_called()
+    assert audit == []
+
+
+def test_diff_fields_reports_only_real_changes():
+    changed = customer_entry.diff_fields(
+        {"a": 1, "b": "x", "c": None},
+        {"a": 1, "b": "y", "c": None, "d": "new"},
+    )
+    assert changed == {"b": ["x", "y"], "d": [None, "new"]}
 
 
 # ── Permissions ──────────────────────────────────────────────────────────

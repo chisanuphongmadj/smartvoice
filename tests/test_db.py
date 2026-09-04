@@ -578,29 +578,33 @@ class TestCustomerAndWarrantyEditing(DBTestCase):
         self.assertEqual(row["customer_id"], second)
         self.assertEqual(row["size"], "6ft")
 
-    def test_delete_warranty_detaches_it_from_call_links(self):
+    def test_soft_delete_warranty_hides_the_row_but_keeps_it(self):
         customer_id = self._customer()
         warranty_id = self._warranty(customer_id)
         call_id = db.insert_call("c.wav", "hash-1", "data/raw_audio/c.wav")
         db.link_call_customer(call_id, customer_id, warranty_id)
 
-        self.assertEqual(db.delete_warranty(warranty_id), 1)
+        self.assertEqual(db.soft_delete_warranty(warranty_id, actor="admin"), 1)
+
         self.assertIsNone(db.get_warranty_by_id(warranty_id))
-        link = db.get_call_customer_link(call_id)
-        self.assertIsNotNone(link)          # the call keeps its customer…
-        self.assertIsNone(link["warranty_id"])  # …but no longer points at the warranty
+        hidden = db.get_warranty_by_id(warranty_id, include_deleted=True)
+        self.assertIsNotNone(hidden)                 # the row is still there…
+        self.assertEqual(hidden["deleted_by"], "admin")
+        self.assertEqual(db.get_all_warranties(), [])
+        self.assertEqual(len(db.get_deleted_warranties()), 1)
+        # …and the call link is untouched, so history still resolves.
+        self.assertEqual(db.get_call_customer_link(call_id)["warranty_id"], warranty_id)
 
-    def test_delete_customer_is_refused_while_rows_still_reference_it(self):
-        customer_id = self._customer()
-        self._warranty(customer_id)
+        self.assertEqual(db.restore_warranty(warranty_id), 1)
+        self.assertIsNotNone(db.get_warranty_by_id(warranty_id))
 
-        result = db.delete_customer(customer_id)
+    def test_soft_delete_warranty_is_idempotent(self):
+        warranty_id = self._warranty(self._customer())
 
-        self.assertEqual(result["deleted"], 0)
-        self.assertEqual(result["warranties"], 1)
-        self.assertIsNotNone(db.get_customer_by_id(customer_id))
+        self.assertEqual(db.soft_delete_warranty(warranty_id), 1)
+        self.assertEqual(db.soft_delete_warranty(warranty_id), 0)
 
-    def test_delete_customer_with_cascade_clears_dependants_but_keeps_calls(self):
+    def test_soft_delete_customer_hides_customer_and_warranties_only(self):
         customer_id = self._customer()
         self._warranty(customer_id)
         call_id = db.insert_call("c.wav", "hash-2", "data/raw_audio/c.wav")
@@ -608,19 +612,48 @@ class TestCustomerAndWarrantyEditing(DBTestCase):
         case_id = db.create_case(customer_id, "ผ้าขาด")
         db.assign_call_to_case(call_id, case_id)
 
-        result = db.delete_customer(customer_id, cascade=True)
+        result = db.soft_delete_customer(customer_id, actor="admin")
 
-        self.assertEqual(result["deleted"], 1)
-        self.assertEqual((result["warranties"], result["calls"], result["cases"]), (1, 1, 1))
+        self.assertEqual((result["customer"], result["warranties"]), (1, 1))
         self.assertIsNone(db.get_customer_by_id(customer_id))
+        self.assertEqual(db.get_all_customers(), [])
         self.assertEqual(db.get_warranties_by_customer(customer_id), [])
-        self.assertIsNone(db.get_call_customer_link(call_id))
-        self.assertIsNone(db.get_case_by_id(case_id))
 
-        # The call itself survives, detached from the deleted case.
+        # Nothing was removed: the rows and everything attached still exist.
+        hidden = db.get_customer_by_id(customer_id, include_deleted=True)
+        self.assertEqual(hidden["deleted_by"], "admin")
+        self.assertEqual(len(db.get_warranties_by_customer(customer_id, include_deleted=True)), 1)
+        self.assertIsNotNone(db.get_call_customer_link(call_id))
+        self.assertIsNotNone(db.get_case_by_id(case_id))
         call = db.get_call_by_id(call_id)
-        self.assertIsNotNone(call)
-        self.assertIsNone(call["case_id"])
+        self.assertEqual(call["case_id"], case_id)
+
+    def test_restore_customer_brings_back_the_warranties_hidden_with_it(self):
+        customer_id = self._customer()
+        kept_hidden = self._warranty(customer_id, "W002OZ25002")
+        db.soft_delete_warranty(kept_hidden)      # hidden on its own, earlier
+        with_customer = self._warranty(customer_id, "W003OZ25003")
+        db.soft_delete_customer(customer_id)
+
+        result = db.restore_customer(customer_id)
+
+        self.assertEqual((result["customer"], result["warranties"]), (1, 1))
+        self.assertIsNotNone(db.get_customer_by_id(customer_id))
+        self.assertIsNotNone(db.get_warranty_by_id(with_customer))
+        # The one hidden separately stays hidden — restoring is not a blanket undo.
+        self.assertIsNone(db.get_warranty_by_id(kept_hidden))
+
+    def test_a_hidden_phone_is_still_taken_because_the_column_is_unique(self):
+        customer_id = self._customer(phone="0812345600")
+        db.soft_delete_customer(customer_id)
+
+        self.assertIsNone(db.get_customer_by_phone("0812345600"))
+        self.assertIsNotNone(db.get_customer_by_phone("0812345600", include_deleted=True))
+        # insert_customer stays idempotent instead of hitting the UNIQUE constraint
+        self.assertEqual(
+            db.insert_customer(first_name="ใคร", last_name="ก็ตาม", phone="0812345600"),
+            customer_id,
+        )
 
     def test_count_customer_dependencies_reports_each_kind(self):
         customer_id = self._customer()
@@ -633,6 +666,46 @@ class TestCustomerAndWarrantyEditing(DBTestCase):
             db.count_customer_dependencies(customer_id),
             {"warranties": 1, "calls": 1, "cases": 1},
         )
+
+
+class TestAuditLog(DBTestCase):
+    def test_log_action_stores_actor_and_changes(self):
+        entry_id = db.log_action(
+            action="update",
+            entity="customer",
+            entity_id=7,
+            entity_label="มาลี ดอกไม้",
+            actor="admin",
+            actor_role="Admin",
+            changes={"phone": ["0812345600", "0899999999"]},
+        )
+
+        entries = db.get_audit_log()
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry["id"], entry_id)
+        self.assertEqual(entry["actor"], "admin")
+        self.assertEqual(entry["entity_label"], "มาลี ดอกไม้")
+        self.assertEqual(entry["changes"], {"phone": ["0812345600", "0899999999"]})
+
+    def test_get_audit_log_filters_and_orders_newest_first(self):
+        db.log_action("create", "customer", 1, "ก")
+        db.log_action("create", "warranty", 2, "W001")
+        db.log_action("update", "customer", 1, "ก")
+
+        customer_entries = db.get_audit_log(entity="customer")
+        self.assertEqual([e["action"] for e in customer_entries], ["update", "create"])
+        self.assertEqual(len(db.get_audit_log(entity="warranty")), 1)
+        self.assertEqual(len(db.get_audit_log(entity="customer", entity_id=1)), 2)
+        self.assertEqual(db.count_audit_entries(), 3)
+        self.assertEqual(db.count_audit_entries(entity="warranty"), 1)
+
+    def test_audit_log_survives_hiding_the_row_it_describes(self):
+        customer_id = db.insert_customer(first_name="มาลี", last_name="ดอกไม้", phone="0812345600")
+        db.log_action("create", "customer", customer_id, "มาลี ดอกไม้", actor="admin")
+        db.soft_delete_customer(customer_id, actor="admin")
+
+        self.assertEqual(len(db.get_audit_log(entity="customer", entity_id=customer_id)), 1)
 
 
 if __name__ == "__main__":

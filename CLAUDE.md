@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 277 tests, must pass 100% before every commit.
+**Current test baseline:** 299 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -45,20 +45,21 @@ ollama serve
 | File | Role |
 |------|------|
 | `config.py` | Single source of truth for all env vars |
-| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)`. Customer/warranty edits go through `update_customer()` / `update_warranty()` (column whitelists) and `delete_customer(cascade=)` / `delete_warranty()` — see **Deleting a customer** |
+| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)`. Also holds the append-only `audit_log` table. Customer/warranty edits go through `update_customer()` / `update_warranty()` (column whitelists); deletes are `soft_delete_*()` / `restore_*()` — see **Soft delete + audit trail** |
 | `pipeline.py` | Core orchestrator — speaker correction multi-pass, case assignment (~70 KB) |
 | `prompts.py` | All LLM prompt templates (~54 KB) |
 | `ollama_client.py` | LLM client + JSON extraction; 4 separate analysis calls. Includes `normalize_topic_detail()` for the product-issue drill-down vocabulary |
 | `file_manager.py` | Audio upload + SHA-256 deduplication. Filename helpers: `extract_phone_from_filename()`, `extract_direction_from_filename()` (Inbound/Outbound), `extract_agent_code_from_filename()` |
 | `env_settings.py` | `.env` read/write + UI helpers: `gpu_available()`, `gpu_device_name()`, `validate_whisper_combo()` (model/backend/device/compute compatibility), `recommended_combo_for_model()` (auto-apply on model change) |
 | `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
-| `customer_entry.py` | Validation + create/update/delete rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths, dependency summary before a customer delete) — no Streamlit import, so it is unit-testable |
+| `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page, and the place every `audit_log` entry is written (phone normalisation, duplicate guards that skip the row being edited, `diff_fields()` before/after, warranty expiry maths) — no Streamlit import, so it is unit-testable |
+| `audit.py` | Audit-trail vocabulary + `record()` — action/entity constants, Thai labels, secret redaction, `diff_fields()`. Every page logs through it (`ui_helpers.audit()` fills in the signed-in user) |
 | `auth.py` | PBKDF2 hashing, DB/`.env` account lookup, role → page permission matrix (`ROLE_PERMISSIONS`, `can_access()`, `visible_pages()`) |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
 
 `Home.py` is the router (see **Login & role-based navigation**), not just a landing page.
 
-Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py`, `3_👥_Customers.py`, `4_Settings.py`, `5_👤_Users.py`, `6_➕_Data_Entry.py`
+Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py`, `3_👥_Customers.py`, `4_Settings.py`, `5_👤_Users.py`, `6_➕_Data_Entry.py`, `7_📜_Audit_Log.py`
 
 ### Speaker correction pipeline (`pipeline.py:1408-1459`)
 
@@ -168,12 +169,12 @@ No DB migration needed for direction/agent — derive at filter-time.
 
 Permissions live in one place, `auth.ROLE_PERMISSIONS`:
 
-| Role | home | admin | dashboard | customers | data_entry | settings | users |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| Admin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Supervisor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
-| QA | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Agent | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Role | home | admin | dashboard | customers | data_entry | audit | settings | users |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| Admin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Supervisor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
+| QA | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Agent | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 Rules to keep intact:
 
@@ -184,20 +185,52 @@ Rules to keep intact:
 - `auth.would_remove_last_admin()` guards the Users page — there must always be ≥1 enabled Admin.
 - Session state holds the login, so a browser refresh (F5) logs the user out. That's accepted; no cookie/JWT layer.
 
-## Deleting a customer
+## Soft delete + audit trail
 
-`db.delete_customer(customer_id, cascade=False)` refuses while anything still
-references the customer and returns the dependency counts instead
-(`{"deleted": 0, "warranties": n, "calls": n, "cases": n}`). The Admin page shows
-those counts, and only the confirm checkbox turns on the `cascade=True` call.
+**Customer and warranty rows are never removed from the database.** "ลบ" in the
+UI means `deleted_at` / `deleted_by` get stamped, the row drops out of every
+default query, and an audit entry records who did it. Never add a
+`DELETE FROM customers` / `DELETE FROM warranty_registrations` anywhere.
 
-With cascade the order matters: the customer's cases are detached from their
-calls (`calls.case_id = NULL`) **before** the cases are deleted, otherwise calls
-keep pointing at case ids that no longer exist. Warranty rows and
-`call_customer_links` rows are removed too, but **the calls themselves are never
-deleted** — audio, transcript and analysis belong to the call, not to the
-customer record. `delete_warranty()` likewise nulls `call_customer_links.warranty_id`
-before removing the row.
+- `soft_delete_customer()` hides the customer **and** their warranties, flagging
+  those warranties `hidden_with_customer = 1`. Call links, cases and calls are
+  left completely untouched, so call history still resolves.
+- `restore_customer()` brings back the customer plus only the warranties carrying
+  that flag — one an Admin hid separately stays hidden. (A shared `deleted_at`
+  timestamp cannot be used for this: two hides in the same second collide.)
+- `soft_delete_warranty()` / `restore_warranty()` handle a single registration;
+  restoring is refused while its customer is still hidden.
+- Every read helper takes `include_deleted=False` by default. `phone` and
+  `registration_no` are UNIQUE, so a hidden row still owns its value — the
+  duplicate check in `customer_entry` looks with `include_deleted=True` and tells
+  the user to restore instead of failing on the constraint later.
+
+### What gets logged
+
+Every staff action goes through `audit.record()` (pages call the session-aware
+`ui_helpers.audit()` wrapper) and lands in the append-only `audit_log` table,
+readable on `pages/7_📜_Audit_Log.py` (Admin + Supervisor):
+
+| Source | Entries |
+|---|---|
+| `ui_helpers` login flow | `login`, `login_failed`, `logout`, self-service password change |
+| `customer_entry` | customer / warranty create, update, hide, restore |
+| `pages/5_👤_Users.py` | account create, role & status change, password reset, delete |
+| `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case status/subject/merge |
+| `pages/4_Settings.py` | `.env` saves and the Quick Mode presets |
+
+Rules that keep the trail trustworthy:
+
+- **`audit_log` is append-only** — nothing in the codebase updates or deletes a
+  row in it. That is also why customers and warranties are hidden, not removed:
+  a log pointing at rows that no longer exist explains nothing.
+- `audit.record()` **never raises** — a failed log must not lose the user's action.
+- Secrets are dropped by `audit.redact()` (`password`, `password_hash`,
+  `hf_token`, ...); the field name stays so the change is still visible.
+- `update` entries carry `{field: [before, after]}` from `audit.diff_fields()`,
+  and an edit that changes nothing writes no entry at all.
+- Adding a new mutating action means adding an `audit()` call next to it —
+  `tests/test_audit.py` checks that every page which changes data touches the trail.
 
 ## Settings page behavior
 

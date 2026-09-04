@@ -55,6 +55,7 @@ def test_every_page_file_enforces_its_role_permission():
         "4_Settings.py": auth.PAGE_SETTINGS,
         "5_👤_Users.py": auth.PAGE_USERS,
         "6_➕_Data_Entry.py": auth.PAGE_DATA_ENTRY,
+        "7_📜_Audit_Log.py": auth.PAGE_AUDIT,
     }
     for filename, page_key in guarded.items():
         source = Path("pages") / filename

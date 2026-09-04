@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -113,6 +114,19 @@ def init_db() -> None:
             )
         """)
         conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor         TEXT,
+                actor_role    TEXT,
+                action        TEXT NOT NULL,
+                entity        TEXT NOT NULL,
+                entity_id     INTEGER,
+                entity_label  TEXT,
+                changes       TEXT,
+                created_at    TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS cases (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_id   INTEGER REFERENCES customers(id),
@@ -128,6 +142,37 @@ def init_db() -> None:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
+    _migrate_calls(conn)
+    _migrate_soft_delete(conn)
+
+
+def _migrate_soft_delete(conn: sqlite3.Connection) -> None:
+    """Add the soft-delete columns to existing databases.
+
+    Customers and warranty registrations are never removed from the database —
+    they are hidden by stamping `deleted_at`, so the row stays available as a
+    record of what happened (see `soft_delete_customer`).
+    """
+    for table in ("customers", "warranty_registrations"):
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for col in ("deleted_at", "deleted_by"):
+            if col not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+
+    # Marks the warranties that were hidden *because* their customer was hidden,
+    # so restoring the customer brings back exactly those (and not the ones an
+    # Admin hid separately). A timestamp cannot tell them apart — two hides in
+    # the same second would collide.
+    warranty_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(warranty_registrations)").fetchall()
+    }
+    if "hidden_with_customer" not in warranty_cols:
+        conn.execute(
+            "ALTER TABLE warranty_registrations ADD COLUMN hidden_with_customer INTEGER DEFAULT 0"
+        )
+
+
+def _migrate_calls(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(calls)").fetchall()}
     new_cols = [
         ("speaker_mapping",   "TEXT"),
@@ -454,9 +499,13 @@ def insert_customer(
     country: str = "Thailand", postcode: str = None,
 ) -> int:
     """Insert a customer. If phone already exists, returns the existing customer's id
-    (idempotent — safe for seed scripts to re-run)."""
+    (idempotent — safe for seed scripts to re-run).
+
+    Hidden customers count as existing: `phone` is UNIQUE, so a soft-deleted row
+    still owns the number. The UI blocks this case earlier and offers a restore.
+    """
     if phone:
-        existing = get_customer_by_phone(phone)
+        existing = get_customer_by_phone(phone, include_deleted=True)
         if existing:
             return existing["id"]
     now = _now()
@@ -474,23 +523,45 @@ def insert_customer(
     return cur.lastrowid
 
 
-def get_all_customers() -> list[dict]:
+def get_all_customers(include_deleted: bool = False) -> list[dict]:
+    """Active customers. Hidden (soft-deleted) rows are excluded by default."""
+    where = "" if include_deleted else "WHERE deleted_at IS NULL"
     conn = get_connection()
-    rows = conn.execute("SELECT * FROM customers ORDER BY last_name, first_name").fetchall()
+    rows = conn.execute(
+        f"SELECT * FROM customers {where} ORDER BY last_name, first_name"
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_customer_by_phone(phone: str) -> dict | None:
+def get_deleted_customers() -> list[dict]:
+    """Hidden customers, newest hidden first — the 'trash' view."""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM customers WHERE phone = ?", (phone,)).fetchone()
+    rows = conn.execute(
+        "SELECT * FROM customers WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_customer_by_phone(phone: str, include_deleted: bool = False) -> dict | None:
+    """Look up by phone. `include_deleted` matters because `phone` is UNIQUE —
+    a hidden customer still owns their number, so the caller has to notice."""
+    extra = "" if include_deleted else "AND deleted_at IS NULL"
+    conn = get_connection()
+    row = conn.execute(
+        f"SELECT * FROM customers WHERE phone = ? {extra}", (phone,)
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
-def get_customer_by_id(customer_id: int) -> dict | None:
+def get_customer_by_id(customer_id: int, include_deleted: bool = False) -> dict | None:
+    extra = "" if include_deleted else "AND deleted_at IS NULL"
     conn = get_connection()
-    row = conn.execute("SELECT * FROM customers WHERE id = ?", (customer_id,)).fetchone()
+    row = conn.execute(
+        f"SELECT * FROM customers WHERE id = ? {extra}", (customer_id,)
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -542,57 +613,76 @@ def count_customer_dependencies(customer_id: int) -> dict[str, int]:
     return counts
 
 
-def delete_customer(customer_id: int, cascade: bool = False) -> dict[str, int]:
-    """Delete a customer row.
+def soft_delete_customer(customer_id: int, actor: str | None = None) -> dict[str, int]:
+    """Hide a customer instead of deleting the row.
 
-    Without `cascade` the delete is refused while anything still references the
-    customer, so a mis-click cannot silently drop warranty history. With
-    `cascade` the warranty rows, call links and cases are removed first and the
-    affected calls are detached from those cases.
+    Nothing is removed from the database: the customer and their warranty
+    registrations get a `deleted_at` stamp so they drop out of every default
+    query, while call links, cases and the calls themselves stay exactly as they
+    were. `restore_customer` puts everything back.
 
-    The calls themselves (audio, transcript, analysis) are always kept — they
-    belong to the call, not to the customer record.
-
-    Returns {"deleted": 0|1, "warranties": n, "calls": n, "cases": n} where the
-    counts are what was removed (or what blocked the delete when deleted == 0).
+    Returns {"customer": 0|1, "warranties": n, "deleted_at": timestamp}.
     """
-    dependencies = count_customer_dependencies(customer_id)
-    if not cascade and any(dependencies.values()):
-        return {"deleted": 0, **dependencies}
-
+    now = _now()
     conn = get_connection()
     with conn:
-        case_ids = [
-            row["id"]
-            for row in conn.execute(
-                "SELECT id FROM cases WHERE customer_id = ?", (customer_id,)
-            ).fetchall()
-        ]
-        if case_ids:
-            placeholders = ",".join("?" * len(case_ids))
-            conn.execute(
-                f"UPDATE calls SET case_id = NULL WHERE case_id IN ({placeholders})",
-                case_ids,
+        cur = conn.execute(
+            """UPDATE customers SET deleted_at = ?, deleted_by = ?
+               WHERE id = ? AND deleted_at IS NULL""",
+            (now, actor, customer_id),
+        )
+        hidden = cur.rowcount
+        warranties = 0
+        if hidden:
+            wcur = conn.execute(
+                """UPDATE warranty_registrations
+                   SET deleted_at = ?, deleted_by = ?, hidden_with_customer = 1
+                   WHERE customer_id = ? AND deleted_at IS NULL""",
+                (now, actor, customer_id),
             )
-        conn.execute("DELETE FROM cases WHERE customer_id = ?", (customer_id,))
-        conn.execute(
-            "DELETE FROM call_customer_links WHERE customer_id = ?", (customer_id,)
-        )
-        conn.execute(
-            "DELETE FROM warranty_registrations WHERE customer_id = ?", (customer_id,)
-        )
-        cur = conn.execute("DELETE FROM customers WHERE id = ?", (customer_id,))
-        deleted = cur.rowcount
+            warranties = wcur.rowcount or 0
     conn.close()
-    return {"deleted": deleted, **dependencies}
+    return {"customer": hidden, "warranties": warranties, "deleted_at": now if hidden else None}
+
+
+def restore_customer(customer_id: int) -> dict[str, int]:
+    """Un-hide a customer, together with the warranties hidden in the same action.
+
+    Warranties an Admin hid separately keep their own `deleted_at` and stay
+    hidden — only the ones flagged `hidden_with_customer` come back.
+    """
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """UPDATE customers SET deleted_at = NULL, deleted_by = NULL
+               WHERE id = ? AND deleted_at IS NOT NULL""",
+            (customer_id,),
+        )
+        restored = cur.rowcount
+        warranties = 0
+        if restored:
+            wcur = conn.execute(
+                """UPDATE warranty_registrations
+                   SET deleted_at = NULL, deleted_by = NULL, hidden_with_customer = 0
+                   WHERE customer_id = ? AND hidden_with_customer = 1""",
+                (customer_id,),
+            )
+            warranties = wcur.rowcount or 0
+    conn.close()
+    return {"customer": restored, "warranties": warranties}
 
 
 # ─── Warranty Registrations ───────────────────────────────────────────────────
 
-def get_warranty_by_registration(registration_no: str) -> dict | None:
+def get_warranty_by_registration(
+    registration_no: str, include_deleted: bool = False
+) -> dict | None:
+    """Look up by registration number, which is UNIQUE — so a hidden row still
+    owns its number and `include_deleted` decides whether the caller sees it."""
+    extra = "" if include_deleted else "AND deleted_at IS NULL"
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM warranty_registrations WHERE registration_no = ?",
+        f"SELECT * FROM warranty_registrations WHERE registration_no = ? {extra}",
         (registration_no,),
     ).fetchone()
     conn.close()
@@ -609,8 +699,12 @@ def insert_warranty(
     order_number: str = None, expiry_date: str = None, remark: str = None,
 ) -> int:
     """Insert a warranty registration. If registration_no already exists,
-    returns the existing id (idempotent — safe for seed scripts to re-run)."""
-    existing = get_warranty_by_registration(registration_no)
+    returns the existing id (idempotent — safe for seed scripts to re-run).
+
+    Hidden rows count as existing: `registration_no` is UNIQUE, so the number
+    stays taken. The UI blocks this earlier and offers a restore instead.
+    """
+    existing = get_warranty_by_registration(registration_no, include_deleted=True)
     if existing:
         return existing["id"]
     now = _now()
@@ -632,10 +726,11 @@ def insert_warranty(
     return cur.lastrowid
 
 
-def get_warranty_by_id(warranty_id: int) -> dict | None:
+def get_warranty_by_id(warranty_id: int, include_deleted: bool = False) -> dict | None:
+    extra = "" if include_deleted else "AND deleted_at IS NULL"
     conn = get_connection()
     row = conn.execute(
-        "SELECT * FROM warranty_registrations WHERE id = ?", (warranty_id,)
+        f"SELECT * FROM warranty_registrations WHERE id = ? {extra}", (warranty_id,)
     ).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -668,39 +763,72 @@ def update_warranty(warranty_id: int, **fields) -> int:
     return updated
 
 
-def delete_warranty(warranty_id: int) -> int:
-    """Delete a warranty registration, detaching it from any call link first."""
+def soft_delete_warranty(warranty_id: int, actor: str | None = None) -> int:
+    """Hide a warranty registration; the row and its call link stay in the DB."""
     conn = get_connection()
     with conn:
-        conn.execute(
-            "UPDATE call_customer_links SET warranty_id = NULL WHERE warranty_id = ?",
+        cur = conn.execute(
+            """UPDATE warranty_registrations
+               SET deleted_at = ?, deleted_by = ?, hidden_with_customer = 0
+               WHERE id = ? AND deleted_at IS NULL""",
+            (_now(), actor, warranty_id),
+        )
+        hidden = cur.rowcount
+    conn.close()
+    return hidden
+
+
+def restore_warranty(warranty_id: int) -> int:
+    """Un-hide a warranty registration."""
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """UPDATE warranty_registrations
+               SET deleted_at = NULL, deleted_by = NULL, hidden_with_customer = 0
+               WHERE id = ? AND deleted_at IS NOT NULL""",
             (warranty_id,),
         )
-        cur = conn.execute(
-            "DELETE FROM warranty_registrations WHERE id = ?", (warranty_id,)
-        )
-        deleted = cur.rowcount
+        restored = cur.rowcount
     conn.close()
-    return deleted
+    return restored
 
 
-def get_warranties_by_customer(customer_id: int) -> list[dict]:
+def get_warranties_by_customer(customer_id: int, include_deleted: bool = False) -> list[dict]:
+    extra = "" if include_deleted else "AND deleted_at IS NULL"
     conn = get_connection()
     rows = conn.execute(
-        "SELECT * FROM warranty_registrations WHERE customer_id = ? ORDER BY date_of_purchase DESC",
+        f"""SELECT * FROM warranty_registrations
+            WHERE customer_id = ? {extra}
+            ORDER BY date_of_purchase DESC""",
         (customer_id,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
-def get_all_warranties() -> list[dict]:
+def get_all_warranties(include_deleted: bool = False) -> list[dict]:
+    where = "" if include_deleted else "WHERE w.deleted_at IS NULL"
+    conn = get_connection()
+    rows = conn.execute(
+        f"""SELECT w.*, c.first_name, c.last_name, c.phone
+            FROM warranty_registrations w
+            LEFT JOIN customers c ON c.id = w.customer_id
+            {where}
+            ORDER BY w.date_of_purchase DESC"""
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_deleted_warranties() -> list[dict]:
+    """Hidden warranty registrations, newest hidden first — the 'trash' view."""
     conn = get_connection()
     rows = conn.execute(
         """SELECT w.*, c.first_name, c.last_name, c.phone
            FROM warranty_registrations w
            LEFT JOIN customers c ON c.id = w.customer_id
-           ORDER BY w.date_of_purchase DESC"""
+           WHERE w.deleted_at IS NOT NULL
+           ORDER BY w.deleted_at DESC"""
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -1042,6 +1170,96 @@ def get_previous_call_summaries_for_customer(customer_id: int, exclude_call_id: 
     rows = conn.execute(query, params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Audit trail ──────────────────────────────────────────────────────────
+#
+# Append-only history of who changed what. Rows are never updated or deleted,
+# which is also why customers and warranties are hidden rather than removed —
+# a log that points at rows which no longer exist explains nothing.
+
+
+def log_action(
+    action: str,
+    entity: str,
+    entity_id: int | None = None,
+    entity_label: str | None = None,
+    actor: str | None = None,
+    actor_role: str | None = None,
+    changes: dict | None = None,
+) -> int:
+    """Append one row to the audit trail.
+
+    `action` is create / update / delete / restore, `entity` is the kind of row
+    that changed (customer, warranty, ...), and `changes` is a small dict that is
+    stored as JSON — {field: [before, after]} for an update, a snapshot of the
+    identifying fields otherwise. Nothing here is ever updated or deleted.
+    """
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO audit_log
+               (actor, actor_role, action, entity, entity_id, entity_label, changes, created_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                actor,
+                actor_role,
+                action,
+                entity,
+                entity_id,
+                entity_label,
+                json.dumps(changes, ensure_ascii=False) if changes else None,
+                _now(),
+            ),
+        )
+    conn.close()
+    return cur.lastrowid
+
+
+def get_audit_log(
+    entity: str | None = None,
+    entity_id: int | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Audit entries, newest first, optionally narrowed to one entity or row."""
+    clauses = []
+    params: list = []
+    if entity:
+        clauses.append("entity = ?")
+        params.append(entity)
+    if entity_id is not None:
+        clauses.append("entity_id = ?")
+        params.append(entity_id)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(limit)
+
+    conn = get_connection()
+    rows = conn.execute(
+        f"SELECT * FROM audit_log {where} ORDER BY id DESC LIMIT ?", params
+    ).fetchall()
+    conn.close()
+
+    entries = []
+    for row in rows:
+        entry = dict(row)
+        try:
+            entry["changes"] = json.loads(entry["changes"]) if entry["changes"] else {}
+        except json.JSONDecodeError:  # pragma: no cover - defensive
+            entry["changes"] = {}
+        entries.append(entry)
+    return entries
+
+
+def count_audit_entries(entity: str | None = None) -> int:
+    conn = get_connection()
+    if entity:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE entity = ?", (entity,)
+        ).fetchone()
+    else:
+        row = conn.execute("SELECT COUNT(*) FROM audit_log").fetchone()
+    conn.close()
+    return int(row[0] or 0)
 
 
 # ── Users (staff login accounts) ─────────────────────────────────────────

@@ -159,6 +159,10 @@ erDiagram
 | `email`, `gender`, `date_of_birth` | ข้อมูลลูกค้า |
 | `address`, `subdistrict`, `district`, `city_province`, `country`, `postcode` | ที่อยู่ |
 | `created_at` | เวลาสร้าง |
+| `deleted_at` | ว่าง = ใช้งานอยู่; มีค่า = ถูกซ่อน (soft delete) แถวไม่เคยถูกลบจริง |
+| `deleted_by` | username ที่กดซ่อน |
+
+> `phone` เป็น UNIQUE ทั้งตาราง แถวที่ถูกซ่อนจึงยังจองเบอร์นั้นอยู่ — การสร้างลูกค้าด้วยเบอร์เดิมจะถูกบล็อกพร้อมข้อความให้ไปกู้คืนแทน
 
 ### `warranty_registrations`
 
@@ -172,6 +176,23 @@ erDiagram
 | `warranty_period_months` | ระยะประกัน |
 | `date_of_purchase`, `date_of_delivery`, `purchase_channel`, `order_number`, `expiry_date`, `remark` | รายละเอียดการซื้อ/รับประกัน |
 | `created_at` | เวลาสร้าง |
+| `deleted_at`, `deleted_by` | soft delete เหมือน `customers` |
+| `hidden_with_customer` | 1 = ถูกซ่อนเพราะลูกค้าถูกซ่อน (กู้คืนพร้อมลูกค้า), 0 = Admin ซ่อนรายการนี้เอง (กู้คืนแยก) |
+
+### `audit_log`
+
+| Column | Meaning |
+|---|---|
+| `id` | PK |
+| `actor`, `actor_role` | ใครทำ (username + role ตอนนั้น) |
+| `action` | `create` / `update` / `delete` (= ซ่อน) / `restore` |
+| `entity` | `customer` / `warranty` |
+| `entity_id` | id ของแถวที่ถูกกระทำ |
+| `entity_label` | ชื่อ/เลขทะเบียนตอนนั้น เก็บไว้อ่านย้อนหลังได้แม้ข้อมูลจะเปลี่ยนภายหลัง |
+| `changes` | JSON — `{field: [ก่อน, หลัง]}` สำหรับ update, snapshot สำหรับ create/delete |
+| `created_at` | เวลาที่บันทึก |
+
+> ตารางนี้เป็น **append-only** ไม่มีโค้ดส่วนใดใน repo ที่ UPDATE หรือ DELETE แถวใน `audit_log`
 
 ### `call_customer_links`
 
@@ -222,8 +243,14 @@ erDiagram
 - `case_id`
 - `uploaded_by`
 - `uploaded_by_role`
+- `topic_detail`
 
-ดังนั้นการเปิด DB เก่าด้วยแอปเวอร์ชันใหม่จะค่อย ๆ เติม column ที่ขาดให้เอง
+`_migrate_soft_delete()` ทำแบบเดียวกันกับ `customers` (`deleted_at`, `deleted_by`) และ
+`warranty_registrations` (`deleted_at`, `deleted_by`, `hidden_with_customer`) ส่วน `audit_log`
+สร้างด้วย `CREATE TABLE IF NOT EXISTS`
+
+ดังนั้นการเปิด DB เก่าด้วยแอปเวอร์ชันใหม่จะค่อย ๆ เติม column ที่ขาดให้เอง โดยข้อมูลเดิมยังอยู่ครบ
+(`deleted_at` เป็น NULL = ทุกแถวเดิมถือว่ายังใช้งานอยู่)
 
 ---
 

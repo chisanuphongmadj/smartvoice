@@ -5,6 +5,7 @@ import time
 
 import streamlit as st
 
+from smartvoice import audit as audit_trail
 from smartvoice import db, pipeline
 from smartvoice.auth import (
     DEFAULT_ADMIN_PASSWORD,
@@ -159,6 +160,26 @@ def _register_login_failure() -> None:
         st.session_state["_login_locked_until"] = time.time() + LOGIN_LOCK_SECONDS
 
 
+def audit(
+    action: str,
+    entity: str,
+    entity_id: int | None = None,
+    entity_label: str | None = None,
+    changes: dict | None = None,
+) -> None:
+    """Append an audit entry for the signed-in user (see smartvoice.audit)."""
+    user, role = get_current_user()
+    audit_trail.record(
+        action=action,
+        entity=entity,
+        entity_id=entity_id,
+        entity_label=entity_label,
+        actor=user,
+        actor_role=role,
+        changes=changes,
+    )
+
+
 def start_session(record) -> None:
     """Store an authenticated UserRecord in the Streamlit session."""
     st.session_state["current_user"] = record.label
@@ -168,9 +189,28 @@ def start_session(record) -> None:
     st.session_state["current_user_source"] = record.source
     st.session_state["_login_fail_count"] = 0
     st.session_state["_login_locked_until"] = 0.0
+    audit_trail.record(
+        audit_trail.LOGIN,
+        audit_trail.ENTITY_SESSION,
+        entity_id=record.user_id,
+        entity_label=record.username,
+        actor=record.label,
+        actor_role=record.role,
+        changes={"source": record.source},
+    )
 
 
 def end_session() -> None:
+    user, role = get_current_user()
+    if user:
+        audit_trail.record(
+            audit_trail.LOGOUT,
+            audit_trail.ENTITY_SESSION,
+            entity_id=get_current_user_id(),
+            entity_label=st.session_state.get("current_username"),
+            actor=user,
+            actor_role=role,
+        )
     for key in _SESSION_KEYS:
         st.session_state.pop(key, None)
 
@@ -203,6 +243,14 @@ def render_login_page():
                 st.rerun()
             else:
                 _register_login_failure()
+                # Failed attempts are the entries a security review asks for first.
+                audit_trail.record(
+                    audit_trail.LOGIN_FAILED,
+                    audit_trail.ENTITY_SESSION,
+                    entity_label=(username or "").strip() or "—",
+                    actor=(username or "").strip() or None,
+                    changes={"locked": bool(_login_lock_remaining())},
+                )
                 remaining = LOGIN_MAX_ATTEMPTS - st.session_state.get("_login_fail_count", 0)
                 if _login_lock_remaining():
                     st.error(f"ผิดหลายครั้งเกินไป — ถูกล็อก {LOGIN_LOCK_SECONDS} วินาที")
@@ -254,6 +302,13 @@ def render_change_password():
             if error:
                 st.error(error)
             else:
+                audit(
+                    audit_trail.UPDATE,
+                    audit_trail.ENTITY_USER,
+                    entity_id=user_id,
+                    entity_label=st.session_state.get("current_username"),
+                    changes={"password": "เปลี่ยนรหัสผ่านด้วยตนเอง"},
+                )
                 st.success("เปลี่ยนรหัสผ่านเรียบร้อยแล้ว")
 
 

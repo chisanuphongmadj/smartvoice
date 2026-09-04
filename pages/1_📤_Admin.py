@@ -5,11 +5,13 @@ import streamlit as st
 
 st.set_page_config(page_title="SmartVoice — Admin", page_icon="📤", layout="wide")
 
+from smartvoice import audit as audit_trail
 from smartvoice import db, file_manager
 from smartvoice.auth import PAGE_ADMIN, role_label
 from smartvoice.file_manager import extract_direction_from_filename
 from smartvoice.preflight import get_ollama_readiness, ollama_setup_lines
 from smartvoice.ui_helpers import (
+    audit,
     init_page,
     launch_processing,
     launch_processing_queue,
@@ -66,6 +68,13 @@ if uploaded_files:
                 safe_name, file_hash, saved_path,
                 uploaded_by=_current_user,
                 uploaded_by_role=_current_role,
+            )
+            audit(
+                audit_trail.CREATE,
+                audit_trail.ENTITY_CALL,
+                entity_id=call_id,
+                entity_label=safe_name,
+                changes={"file_hash": file_hash, "size_mb": round(len(file_bytes) / 1048576, 2)},
             )
 
             # Auto-link by phone number in filename
@@ -332,6 +341,14 @@ else:
             if call["file_path"] and os.path.exists(call["file_path"]):
                 os.remove(call["file_path"])
         db.delete_calls_bulk(ids_to_delete)
+        for call in calls_to_delete:
+            audit(
+                audit_trail.DELETE,
+                audit_trail.ENTITY_CALL,
+                entity_id=call["id"],
+                entity_label=call["filename"],
+                changes={"status": call["status"], "bulk": True},
+            )
         st.session_state.selected_calls = set()
         st.success(f"ลบ {len(ids_to_delete)} ไฟล์เรียบร้อยแล้ว")
         st.rerun()
@@ -446,6 +463,13 @@ else:
                                 if st.button("🔗 เชื่อม", key=f"link_btn_{call['id']}"):
                                     wid = warr_options.get(wsel) if wsel != "— ไม่ระบุ —" else None
                                     db.link_call_customer(call["id"], cid, wid, matched_by="manual")
+                                    audit(
+                                        audit_trail.UPDATE,
+                                        audit_trail.ENTITY_CALL,
+                                        entity_id=call["id"],
+                                        entity_label=call["filename"],
+                                        changes={"linked_customer_id": cid, "linked_warranty_id": wid},
+                                    )
                                     st.success("เชื่อมข้อมูลเรียบร้อย")
                                     st.rerun()
 
@@ -475,6 +499,13 @@ else:
                                 if new_status != case["status"]:
                                     if st.button("💾 อัปเดทสถานะ", key=f"case_upd_{call['id']}"):
                                         db.update_case_status(case["id"], new_status)
+                                        audit(
+                                            audit_trail.UPDATE,
+                                            audit_trail.ENTITY_CASE,
+                                            entity_id=case["id"],
+                                            entity_label=case["subject"],
+                                            changes={"status": [case["status"], new_status]},
+                                        )
                                         st.success(f"อัปเดทเคส #{case['id']} → {new_status}")
                                         st.rerun()
                             with cs_col2:
@@ -486,6 +517,13 @@ else:
                                 if new_subject != case["subject"]:
                                     if st.button("💾 อัปเดทหัวข้อ", key=f"case_subj_btn_{call['id']}"):
                                         db.update_case_subject(case["id"], new_subject)
+                                        audit(
+                                            audit_trail.UPDATE,
+                                            audit_trail.ENTITY_CASE,
+                                            entity_id=case["id"],
+                                            entity_label=new_subject,
+                                            changes={"subject": [case["subject"], new_subject]},
+                                        )
                                         st.success("อัปเดทหัวข้อเคสเรียบร้อย")
                                         st.rerun()
 
@@ -515,6 +553,13 @@ else:
                                         if st.button("🔗 รวม", key=f"merge_btn_{call['id']}"):
                                             dst_id = merge_opts[picked]
                                             moved = db.merge_cases(case["id"], dst_id)
+                                            audit(
+                                                audit_trail.DELETE,
+                                                audit_trail.ENTITY_CASE,
+                                                entity_id=case["id"],
+                                                entity_label=case["subject"],
+                                                changes={"merged_into_case_id": dst_id, "moved_calls": moved},
+                                            )
                                             st.success(f"ย้าย {moved} สาย → เคส #{dst_id} และลบเคส #{case['id']}")
                                             st.rerun()
 
@@ -602,6 +647,13 @@ else:
                         if call["file_path"] and os.path.exists(call["file_path"]):
                             os.remove(call["file_path"])
                         db.delete_call(call["id"])
+                        audit(
+                            audit_trail.DELETE,
+                            audit_trail.ENTITY_CALL,
+                            entity_id=call["id"],
+                            entity_label=call["filename"],
+                            changes={"status": call["status"]},
+                        )
                         st.session_state.selected_calls.discard(call["id"])
                         st.success(f"ลบ `{call['filename']}` เรียบร้อยแล้ว")
                         st.rerun()

@@ -81,7 +81,9 @@ def _recent_table(rows: list[dict], columns: dict, empty_message: str):
     )
 
 
-tab_customer, tab_warranty = st.tabs(["👤 ลูกค้า", "🛡 ทะเบียนรับประกัน"])
+tab_customer, tab_warranty, tab_hidden = st.tabs(
+    ["👤 ลูกค้า", "🛡 ทะเบียนรับประกัน", "🗄 รายการที่ซ่อนไว้"]
+)
 
 # ─────────────────────────────────────────
 # TAB 1 — CUSTOMERS
@@ -121,6 +123,8 @@ with tab_customer:
 
         if customer_submitted:
             new_id, error = customer_entry.create_customer(
+                actor=current_user,
+                actor_role=current_role,
                 first_name=first_name,
                 last_name=last_name,
                 phone=phone,
@@ -205,6 +209,8 @@ with tab_customer:
             if edit_submitted:
                 error = customer_entry.update_customer(
                     cid,
+                    actor=current_user,
+                    actor_role=current_role,
                     first_name=ed_first,
                     last_name=ed_last,
                     phone=ed_phone,
@@ -225,23 +231,27 @@ with tab_customer:
                         f"บันทึกการแก้ไข **{ed_first.strip()} {ed_last.strip()}** เรียบร้อยแล้ว"
                     )
 
-            st.markdown("**🗑 ลบลูกค้า**")
+            st.markdown("**🗑 ลบลูกค้า (ซ่อนไว้ — กู้คืนได้)**")
             st.caption(
-                "การลบจะเอาทะเบียนรับประกัน การเชื่อมสาย และเคสของลูกค้ารายนี้ออกด้วย — "
-                "ไฟล์เสียงและ transcript ของสายยังอยู่ครบ"
+                "ข้อมูลจะไม่ถูกลบออกจากฐานข้อมูล แต่จะถูกซ่อนพร้อมทะเบียนรับประกันของลูกค้ารายนี้ "
+                "และบันทึกลงประวัติว่าใครซ่อนเมื่อไหร่ — กู้คืนได้ที่แท็บ 🗄 รายการที่ซ่อนไว้ "
+                "ส่วนสาย เคส และการเชื่อมสายยังอยู่ครบ"
             )
-            cascade = st.checkbox(
-                f"ยืนยันลบ `{picked['first_name']} {picked['last_name']}` พร้อมข้อมูลที่ผูกอยู่",
+            confirm_hide = st.checkbox(
+                f"ยืนยันซ่อน `{picked['first_name']} {picked['last_name']}`",
                 key=f"_confirm_delete_customer_{cid}",
             )
-            if st.button("🗑 ลบลูกค้ารายนี้", key=f"_delete_customer_{cid}", disabled=not cascade):
-                result, error = customer_entry.delete_customer(cid, cascade=True)
+            if st.button("🗑 ลบลูกค้ารายนี้", key=f"_delete_customer_{cid}", disabled=not confirm_hide):
+                result, error = customer_entry.hide_customer(
+                    cid, actor=current_user, actor_role=current_role
+                )
                 if error:
                     st.error(error)
                 else:
-                    removed = customer_entry.describe_dependencies(result)
+                    hidden_w = result.get("warranties") or 0
                     _flash_and_rerun(
-                        f"ลบลูกค้าเรียบร้อยแล้ว{f' (พร้อม {removed})' if removed else ''}"
+                        f"ซ่อนลูกค้าเรียบร้อยแล้ว"
+                        + (f" (พร้อมทะเบียนรับประกัน {hidden_w} รายการ)" if hidden_w else "")
                     )
 
     st.divider()
@@ -317,6 +327,8 @@ with tab_warranty:
             st.caption("* จำเป็นต้องกรอก — เลขทะเบียนต้องไม่ซ้ำกับรายการเดิม")
             if st.button("💾 บันทึกทะเบียนรับประกัน", use_container_width=True):
                 new_id, error = customer_entry.create_warranty(
+                    actor=current_user,
+                    actor_role=current_role,
                     registration_no=registration_no,
                     customer_id=customer_id,
                     channel=channel,
@@ -460,6 +472,8 @@ with tab_warranty:
                 if st.button("💾 บันทึกการแก้ไข", key=f"_save_w_{wid}", use_container_width=True):
                     error = customer_entry.update_warranty(
                         wid,
+                        actor=current_user,
+                        actor_role=current_role,
                         registration_no=ed_reg,
                         customer_id=cust_map[ed_owner],
                         channel=ed_channel,
@@ -484,17 +498,22 @@ with tab_warranty:
                     else:
                         _flash_and_rerun(f"บันทึกการแก้ไขทะเบียน **{ed_reg.strip()}** เรียบร้อยแล้ว")
 
-                st.markdown("**🗑 ลบทะเบียนรับประกัน**")
+                st.markdown("**🗑 ลบทะเบียนรับประกัน (ซ่อนไว้ — กู้คืนได้)**")
+                st.caption(
+                    "แถวนี้จะยังอยู่ในฐานข้อมูล แต่ถูกซ่อนจากทุกหน้า และบันทึกลงประวัติว่าใครซ่อน"
+                )
                 confirm_w = st.checkbox(
-                    f"ยืนยันลบทะเบียน `{picked_w['registration_no']}` อย่างถาวร",
+                    f"ยืนยันซ่อนทะเบียน `{picked_w['registration_no']}`",
                     key=f"_confirm_delete_w_{wid}",
                 )
                 if st.button("🗑 ลบทะเบียนนี้", key=f"_delete_w_{wid}", disabled=not confirm_w):
-                    error = customer_entry.delete_warranty(wid)
+                    error = customer_entry.hide_warranty(
+                        wid, actor=current_user, actor_role=current_role
+                    )
                     if error:
                         st.error(error)
                     else:
-                        _flash_and_rerun(f"ลบทะเบียน `{picked_w['registration_no']}` แล้ว")
+                        _flash_and_rerun(f"ซ่อนทะเบียน `{picked_w['registration_no']}` แล้ว")
 
         st.divider()
         st.subheader("ทะเบียนที่เพิ่มล่าสุด")
@@ -512,3 +531,59 @@ with tab_warranty:
             },
             "ยังไม่มีทะเบียนรับประกันในระบบ",
         )
+
+# ─────────────────────────────────────────
+# TAB 3 — HIDDEN ROWS (restore)
+# ─────────────────────────────────────────
+with tab_hidden:
+    st.caption(
+        "รายการที่ถูก \"ลบ\" จะไม่หายไปจากฐานข้อมูล — ถูกซ่อนไว้ที่นี่และกู้คืนได้ทุกเมื่อ"
+    )
+
+    hidden_customers = db.get_deleted_customers()
+    hidden_warranties = db.get_deleted_warranties()
+
+    st.subheader(f"👤 ลูกค้าที่ซ่อนไว้ ({len(hidden_customers)})")
+    if not hidden_customers:
+        st.info("ไม่มีลูกค้าที่ถูกซ่อนไว้")
+    for row in hidden_customers:
+        cols = st.columns([4, 2, 2, 1.4])
+        cols[0].markdown(
+            f"**{row['first_name']} {row['last_name']}** · `{row['phone'] or '-'}` · id={row['id']}"
+        )
+        cols[1].caption(f"ซ่อนโดย: {row['deleted_by'] or '—'}")
+        cols[2].caption(f"เมื่อ: {(row['deleted_at'] or '')[:19].replace('T', ' ')}")
+        if cols[3].button("♻️ กู้คืน", key=f"_restore_c_{row['id']}", use_container_width=True):
+            result, error = customer_entry.restore_customer(
+                row["id"], actor=current_user, actor_role=current_role
+            )
+            if error:
+                st.error(error)
+            else:
+                back = result.get("warranties") or 0
+                _flash_and_rerun(
+                    f"กู้คืน **{row['first_name']} {row['last_name']}** แล้ว"
+                    + (f" (พร้อมทะเบียนรับประกัน {back} รายการ)" if back else "")
+                )
+
+    st.divider()
+    st.subheader(f"🛡 ทะเบียนรับประกันที่ซ่อนไว้ ({len(hidden_warranties)})")
+    if not hidden_warranties:
+        st.info("ไม่มีทะเบียนรับประกันที่ถูกซ่อนไว้")
+    for row in hidden_warranties:
+        cols = st.columns([4, 2, 2, 1.4])
+        owner = f"{row.get('first_name') or '—'} {row.get('last_name') or ''}".strip()
+        cols[0].markdown(
+            f"**{row['registration_no']}** · {row['brand'] or '-'} {row['model'] or ''} · {owner}"
+        )
+        cols[1].caption(f"ซ่อนโดย: {row['deleted_by'] or '—'}")
+        cols[2].caption(f"เมื่อ: {(row['deleted_at'] or '')[:19].replace('T', ' ')}")
+        if cols[3].button("♻️ กู้คืน", key=f"_restore_w_{row['id']}", use_container_width=True):
+            error = customer_entry.restore_warranty(
+                row["id"], actor=current_user, actor_role=current_role
+            )
+            if error:
+                st.error(error)
+            else:
+                _flash_and_rerun(f"กู้คืนทะเบียน `{row['registration_no']}` แล้ว")
+

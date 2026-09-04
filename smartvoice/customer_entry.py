@@ -12,7 +12,7 @@ import re
 import sqlite3
 from datetime import date, datetime
 
-from smartvoice import db
+from smartvoice import audit, db
 
 # Thai numerals show up in pasted CDR/marketplace exports.
 _THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
@@ -105,12 +105,17 @@ def validate_customer(
     if normalized:
         if not _PHONE_RE.match(normalized):
             return "เบอร์โทรต้องขึ้นต้นด้วย 0 และมี 9-10 หลัก (เช่น 0812345678)"
-        existing = db.get_customer_by_phone(normalized)
+        # `phone` is UNIQUE, so a hidden customer still owns the number — say so
+        # instead of letting the insert fail on the constraint.
+        existing = db.get_customer_by_phone(normalized, include_deleted=True)
         if existing and existing["id"] != exclude_id:
-            return (
-                f"เบอร์ `{normalized}` มีลูกค้าอยู่แล้ว — "
-                f"{existing['first_name']} {existing['last_name']} (id={existing['id']})"
-            )
+            who = f"{existing['first_name']} {existing['last_name']} (id={existing['id']})"
+            if existing.get("deleted_at"):
+                return (
+                    f"เบอร์ `{normalized}` เป็นของลูกค้าที่ถูกซ่อนไว้ — {who} "
+                    "กู้คืนจาก 🗄 รายการที่ซ่อนไว้ แทนการสร้างใหม่"
+                )
+            return f"เบอร์ `{normalized}` มีลูกค้าอยู่แล้ว — {who}"
     return None
 
 
@@ -131,8 +136,13 @@ def validate_warranty(
         return "เลขทะเบียนใช้ได้เฉพาะ A-Z 0-9 . _ - / และยาวอย่างน้อย 3 ตัวอักษร"
     if not customer_id:
         return "กรุณาเลือกลูกค้าเจ้าของทะเบียนรับประกัน"
-    existing = db.get_warranty_by_registration(reg)
+    existing = db.get_warranty_by_registration(reg, include_deleted=True)
     if existing and existing["id"] != exclude_id:
+        if existing.get("deleted_at"):
+            return (
+                f"เลขทะเบียน `{reg}` เป็นของรายการที่ถูกซ่อนไว้ (id={existing['id']}) — "
+                "กู้คืนจาก 🗄 รายการที่ซ่อนไว้ แทนการสร้างใหม่"
+            )
         return f"เลขทะเบียน `{reg}` มีอยู่แล้วในระบบ"
     return None
 
@@ -167,7 +177,36 @@ def _warranty_payload(fields: dict) -> dict:
     return payload
 
 
-def create_customer(**fields) -> tuple[int | None, str | None]:
+ENTITY_CUSTOMER = audit.ENTITY_CUSTOMER
+ENTITY_WARRANTY = audit.ENTITY_WARRANTY
+
+diff_fields = audit.diff_fields
+
+
+def customer_label(row: dict) -> str:
+    return f"{row.get('first_name') or ''} {row.get('last_name') or ''}".strip() or "—"
+
+
+def warranty_label(row: dict) -> str:
+    return row.get("registration_no") or "—"
+
+
+def _log(action, entity, entity_id, entity_label, actor, actor_role, changes=None):
+    """Write one audit row; a logging failure must never lose the user's edit."""
+    audit.record(
+        action=action,
+        entity=entity,
+        entity_id=entity_id,
+        entity_label=entity_label,
+        actor=actor,
+        actor_role=actor_role,
+        changes=changes,
+    )
+
+
+def create_customer(
+    actor: str | None = None, actor_role: str | None = None, **fields
+) -> tuple[int | None, str | None]:
     """Validate then insert a customer. Returns (customer_id, error_message)."""
     error = validate_customer(
         fields.get("first_name", ""), fields.get("last_name", ""), fields.get("phone")
@@ -175,28 +214,47 @@ def create_customer(**fields) -> tuple[int | None, str | None]:
     if error:
         return None, error
 
+    payload = _customer_payload(fields)
     try:
-        return db.insert_customer(**_customer_payload(fields)), None
+        customer_id = db.insert_customer(**payload)
     except sqlite3.Error as exc:  # pragma: no cover - defensive
         return None, f"บันทึกไม่สำเร็จ: {exc}"
 
+    _log(
+        "create", ENTITY_CUSTOMER, customer_id, customer_label(payload), actor, actor_role,
+        {key: value for key, value in payload.items() if value not in (None, "")},
+    )
+    return customer_id, None
 
-def create_warranty(**fields) -> tuple[int | None, str | None]:
+
+def create_warranty(
+    actor: str | None = None, actor_role: str | None = None, **fields
+) -> tuple[int | None, str | None]:
     """Validate then insert a warranty registration. Returns (id, error_message)."""
     error = validate_warranty(fields.get("registration_no", ""), fields.get("customer_id"))
     if error:
         return None, error
 
+    payload = _warranty_payload(fields)
     try:
-        return db.insert_warranty(**_warranty_payload(fields)), None
+        warranty_id = db.insert_warranty(**payload)
     except sqlite3.Error as exc:  # pragma: no cover - defensive
         return None, f"บันทึกไม่สำเร็จ: {exc}"
 
+    _log(
+        "create", ENTITY_WARRANTY, warranty_id, warranty_label(payload), actor, actor_role,
+        {key: value for key, value in payload.items() if value not in (None, "")},
+    )
+    return warranty_id, None
 
-def update_customer(customer_id: int, **fields) -> str | None:
+
+def update_customer(
+    customer_id: int, actor: str | None = None, actor_role: str | None = None, **fields
+) -> str | None:
     """Validate then patch an existing customer. Returns an error, or None."""
-    if not db.get_customer_by_id(customer_id):
-        return "ไม่พบลูกค้ารายนี้แล้ว — อาจถูกลบไปก่อนหน้านี้"
+    before = db.get_customer_by_id(customer_id)
+    if not before:
+        return "ไม่พบลูกค้ารายนี้แล้ว — อาจถูกซ่อนไว้ก่อนหน้านี้"
 
     error = validate_customer(
         fields.get("first_name", ""),
@@ -207,17 +265,30 @@ def update_customer(customer_id: int, **fields) -> str | None:
     if error:
         return error
 
+    payload = _customer_payload(fields)
+    changes = diff_fields(before, payload)
+    if not changes:
+        return None
+
     try:
-        db.update_customer(customer_id, **_customer_payload(fields))
+        db.update_customer(customer_id, **payload)
     except sqlite3.Error as exc:  # pragma: no cover - defensive
         return f"บันทึกไม่สำเร็จ: {exc}"
+
+    _log(
+        "update", ENTITY_CUSTOMER, customer_id, customer_label(payload),
+        actor, actor_role, changes,
+    )
     return None
 
 
-def update_warranty(warranty_id: int, **fields) -> str | None:
+def update_warranty(
+    warranty_id: int, actor: str | None = None, actor_role: str | None = None, **fields
+) -> str | None:
     """Validate then patch an existing warranty. Returns an error, or None."""
-    if not db.get_warranty_by_id(warranty_id):
-        return "ไม่พบทะเบียนรับประกันนี้แล้ว — อาจถูกลบไปก่อนหน้านี้"
+    before = db.get_warranty_by_id(warranty_id)
+    if not before:
+        return "ไม่พบทะเบียนรับประกันนี้แล้ว — อาจถูกซ่อนไว้ก่อนหน้านี้"
 
     error = validate_warranty(
         fields.get("registration_no", ""),
@@ -227,17 +298,31 @@ def update_warranty(warranty_id: int, **fields) -> str | None:
     if error:
         return error
 
+    payload = _warranty_payload(fields)
+    changes = diff_fields(before, payload)
+    if not changes:
+        return None
+
     try:
-        db.update_warranty(warranty_id, **_warranty_payload(fields))
+        db.update_warranty(warranty_id, **payload)
     except sqlite3.Error as exc:  # pragma: no cover - defensive
         return f"บันทึกไม่สำเร็จ: {exc}"
+
+    _log(
+        "update", ENTITY_WARRANTY, warranty_id, warranty_label(payload),
+        actor, actor_role, changes,
+    )
     return None
 
 
-# ── Deletion ─────────────────────────────────────────────────────────────
+# ── Hiding & restoring ───────────────────────────────────────────────────
+#
+# Nothing here removes a row. "ลบ" in the UI means the row is stamped with
+# `deleted_at` so it drops out of the app, while the record — and the audit
+# entry describing who hid it — stays in the database.
 
 def describe_dependencies(counts: dict[str, int]) -> str:
-    """Thai summary of what a customer delete would take with it."""
+    """Thai summary of what is attached to a customer."""
     parts = []
     if counts.get("warranties"):
         parts.append(f"ทะเบียนรับประกัน {counts['warranties']} รายการ")
@@ -248,28 +333,72 @@ def describe_dependencies(counts: dict[str, int]) -> str:
     return " · ".join(parts)
 
 
-def delete_customer(customer_id: int, cascade: bool = False) -> tuple[dict, str | None]:
-    """Delete a customer. Returns (result, error_message).
+def hide_customer(
+    customer_id: int, actor: str | None = None, actor_role: str | None = None
+) -> tuple[dict, str | None]:
+    """Hide a customer and their warranties. Returns (result, error_message)."""
+    row = db.get_customer_by_id(customer_id)
+    if not row:
+        return {}, "ไม่พบลูกค้ารายนี้แล้ว — อาจถูกซ่อนไว้ก่อนหน้านี้"
 
-    Without `cascade`, a customer that still has warranties, call links or cases
-    is refused and the error names what is blocking it.
-    """
-    if not db.get_customer_by_id(customer_id):
-        return {}, "ไม่พบลูกค้ารายนี้แล้ว"
+    dependencies = db.count_customer_dependencies(customer_id)
+    result = db.soft_delete_customer(customer_id, actor=actor)
+    if not result.get("customer"):
+        return result, "ลูกค้ารายนี้ถูกซ่อนไว้อยู่แล้ว"
 
-    result = db.delete_customer(customer_id, cascade=cascade)
-    if not result.get("deleted"):
-        blocking = describe_dependencies(result)
-        return result, (
-            f"ลูกค้ารายนี้ยังมีข้อมูลผูกอยู่ ({blocking}) — "
-            "ติ๊กยืนยันเพื่อลบข้อมูลเหล่านี้ไปพร้อมกัน"
-        )
+    _log(
+        "delete", ENTITY_CUSTOMER, customer_id, customer_label(row), actor, actor_role,
+        {"hidden_warranties": result["warranties"], **dependencies},
+    )
     return result, None
 
 
-def delete_warranty(warranty_id: int) -> str | None:
-    """Delete a warranty registration. Returns an error, or None."""
-    if not db.get_warranty_by_id(warranty_id):
-        return "ไม่พบทะเบียนรับประกันนี้แล้ว"
-    db.delete_warranty(warranty_id)
+def restore_customer(
+    customer_id: int, actor: str | None = None, actor_role: str | None = None
+) -> tuple[dict, str | None]:
+    """Un-hide a customer and the warranties hidden with them."""
+    row = db.get_customer_by_id(customer_id, include_deleted=True)
+    if not row:
+        return {}, "ไม่พบลูกค้ารายนี้"
+
+    result = db.restore_customer(customer_id)
+    if not result.get("customer"):
+        return result, "ลูกค้ารายนี้ไม่ได้ถูกซ่อนไว้"
+
+    _log(
+        "restore", ENTITY_CUSTOMER, customer_id, customer_label(row), actor, actor_role,
+        {"restored_warranties": result["warranties"]},
+    )
+    return result, None
+
+
+def hide_warranty(
+    warranty_id: int, actor: str | None = None, actor_role: str | None = None
+) -> str | None:
+    """Hide a warranty registration. Returns an error, or None."""
+    row = db.get_warranty_by_id(warranty_id)
+    if not row:
+        return "ไม่พบทะเบียนรับประกันนี้แล้ว — อาจถูกซ่อนไว้ก่อนหน้านี้"
+
+    if not db.soft_delete_warranty(warranty_id, actor=actor):
+        return "ทะเบียนนี้ถูกซ่อนไว้อยู่แล้ว"
+
+    _log("delete", ENTITY_WARRANTY, warranty_id, warranty_label(row), actor, actor_role)
+    return None
+
+
+def restore_warranty(
+    warranty_id: int, actor: str | None = None, actor_role: str | None = None
+) -> str | None:
+    """Un-hide a warranty registration. Returns an error, or None."""
+    row = db.get_warranty_by_id(warranty_id, include_deleted=True)
+    if not row:
+        return "ไม่พบทะเบียนรับประกันนี้"
+    if row.get("customer_id") and not db.get_customer_by_id(row["customer_id"]):
+        return "ลูกค้าเจ้าของทะเบียนนี้ยังถูกซ่อนอยู่ — กู้คืนลูกค้าก่อน"
+
+    if not db.restore_warranty(warranty_id):
+        return "ทะเบียนนี้ไม่ได้ถูกซ่อนไว้"
+
+    _log("restore", ENTITY_WARRANTY, warranty_id, warranty_label(row), actor, actor_role)
     return None
