@@ -34,11 +34,16 @@ smartvoice/
 │   ├── 1_📤_Admin.py              # Upload, process, case management
 │   ├── 2_📊_Dashboard.py          # Analytics dashboard
 │   ├── 3_👥_Customers.py          # Customer + warranty browse
-│   └── 4_Settings.py              # Demo/AI presets + readiness checks
+│   ├── 4_Settings.py              # Demo/AI presets + readiness checks
+│   ├── 5_👤_Users.py               # Staff accounts (Admin only)
+│   ├── 6_➕_Data_Entry.py          # Add / edit / hide customers + warranties
+│   └── 7_📜_Audit_Log.py           # Audit trail viewer (Admin + Supervisor)
 ├── smartvoice/
+│   ├── audit.py                   # Audit trail vocabulary + record()
 │   ├── auth.py                    # Login, PBKDF2 hashing, role permissions
 │   ├── cli.py                     # `smartvoice` console entrypoint
 │   ├── config.py                  # Environment config ทั้งหมด
+│   ├── customer_entry.py          # Validation for the data-entry page
 │   ├── db.py                      # SQLite schema, migrations, CRUD
 │   ├── env_settings.py            # อ่าน/เขียน `.env` จากหน้า Settings
 │   ├── file_manager.py            # Upload validation + SHA-256 dedup
@@ -168,4 +173,4 @@ Audio (.wav/.mp3)
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-ผลล่าสุดที่ยืนยันแล้ว: `209 passed` (ทดสอบเมื่อ 2026-05-27)
+ผลล่าสุดที่ยืนยันแล้ว: `302 passed` (ทดสอบเมื่อ 2026-09-04)

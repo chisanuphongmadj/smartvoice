@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Users", page_icon="👤", layout="wide")
+st.set_page_config(page_title="SmartVoice — Users", layout="wide")
 
 from smartvoice import audit as audit_trail
 from smartvoice import db
@@ -23,7 +23,7 @@ from smartvoice.ui_helpers import audit, get_current_user_id, init_page
 # Admin only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_USERS)
 
-st.title("👤 จัดการผู้ใช้")
+st.title("จัดการผู้ใช้")
 st.caption(
     "เพิ่มบัญชี / แก้ไขบทบาท / เปิด-ปิดใช้งาน / ลบบัญชี — "
     "รหัสผ่านเป็นของเจ้าของบัญชีเท่านั้น ผู้ดูแลระบบตั้งหรือรีเซ็ตให้ไม่ได้"
@@ -45,7 +45,7 @@ else:
                     "Username": u["username"],
                     "ชื่อที่แสดง": u["display_name"],
                     "บทบาท": role_label(u["role"]),
-                    "สถานะ": "✅ ใช้งาน" if u["is_active"] else "🚫 ปิดใช้งาน",
+                    "สถานะ": "ใช้งาน" if u["is_active"] else "ปิดใช้งาน",
                     "เข้าระบบล่าสุด": (u["last_login_at"] or "—")[:19].replace("T", " "),
                     "สร้างเมื่อ": u["created_at"][:19].replace("T", " "),
                 }
@@ -59,7 +59,7 @@ else:
 st.divider()
 
 # ── Add a new account ────────────────────────────────────────────────────
-st.subheader("➕ เพิ่มผู้ใช้ใหม่")
+st.subheader("เพิ่มผู้ใช้ใหม่")
 
 with st.form("_add_user_form"):
     c1, c2 = st.columns(2)
@@ -109,7 +109,7 @@ if add_submitted:
 st.divider()
 
 # ── Edit an existing account ─────────────────────────────────────────────
-st.subheader("✏️ แก้ไขบัญชี")
+st.subheader("แก้ไขบัญชี")
 
 if not users:
     st.stop()
@@ -199,7 +199,7 @@ with note_col:
 
 st.markdown("**เลิกใช้งานบัญชี**")
 st.caption(
-    "ระบบไม่มีปุ่มลบบัญชีถาวร — บัญชีที่ถูกลบจะทำให้รายการใน 📜 ประวัติการใช้งาน "
+    "ระบบไม่มีปุ่มลบบัญชีถาวร — บัญชีที่ถูกลบจะทำให้รายการในหน้า “ประวัติการใช้งาน” "
     "ชี้ไปยังผู้ใช้ที่ไม่มีอยู่แล้ว ใช้การปิดใช้งานด้านบนแทน: "
     "บัญชีที่ปิดอยู่จะเข้าสู่ระบบไม่ได้ทันที และเปิดกลับมาได้ภายหลัง"
 )

@@ -36,13 +36,13 @@ ENTITY_SESSION = "session"
 ENTITY_SETTINGS = "settings"
 
 ACTION_LABELS_TH = {
-    CREATE: "➕ เพิ่ม",
-    UPDATE: "✏️ แก้ไข",
-    DELETE: "🗑 ลบ/ซ่อน",
-    RESTORE: "♻️ กู้คืน",
-    LOGIN: "🔑 เข้าสู่ระบบ",
-    LOGIN_FAILED: "⛔ เข้าสู่ระบบไม่สำเร็จ",
-    LOGOUT: "🚪 ออกจากระบบ",
+    CREATE: "เพิ่ม",
+    UPDATE: "แก้ไข",
+    DELETE: "ลบ/ซ่อน",
+    RESTORE: "กู้คืน",
+    LOGIN: "เข้าสู่ระบบ",
+    LOGIN_FAILED: "เข้าสู่ระบบไม่สำเร็จ",
+    LOGOUT: "ออกจากระบบ",
 }
 
 ENTITY_LABELS_TH = {

@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Data Entry", page_icon="➕", layout="wide")
+st.set_page_config(page_title="SmartVoice — Data Entry", layout="wide")
 
 from datetime import date
 
@@ -14,7 +14,7 @@ from smartvoice.ui_helpers import init_page
 # Admin only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_DATA_ENTRY)
 
-st.title("➕ ข้อมูลลูกค้า & ทะเบียนรับประกัน")
+st.title("ข้อมูลลูกค้า & ทะเบียนรับประกัน")
 st.caption("เพิ่ม / แก้ไข / ลบ ข้อมูลลูกค้าและทะเบียนรับประกัน — ดูภาพรวมทั้งหมดได้ที่หน้า Customers")
 
 _OTHER = "อื่นๆ"
@@ -82,7 +82,7 @@ def _recent_table(rows: list[dict], columns: dict, empty_message: str):
 
 
 tab_customer, tab_warranty, tab_hidden = st.tabs(
-    ["👤 ลูกค้า", "🛡 ทะเบียนรับประกัน", "🗄 รายการที่ซ่อนไว้"]
+    ["ลูกค้า", "ทะเบียนรับประกัน", "รายการที่ซ่อนไว้"]
 )
 
 # ─────────────────────────────────────────
@@ -91,7 +91,7 @@ tab_customer, tab_warranty, tab_hidden = st.tabs(
 with tab_customer:
     customers = db.get_all_customers()
 
-    with st.expander("➕ เพิ่มลูกค้าใหม่", expanded=not customers):
+    with st.expander("เพิ่มลูกค้าใหม่", expanded=not customers):
         with st.form("_add_customer_form"):
             c1, c2 = st.columns(2)
             with c1:
@@ -119,7 +119,7 @@ with tab_customer:
                 country = st.text_input("ประเทศ", value="Thailand")
 
             st.caption("* จำเป็นต้องกรอก — เบอร์โทรต้องไม่ซ้ำกับลูกค้ารายอื่น (ใช้เชื่อมสายเข้าอัตโนมัติ)")
-            customer_submitted = st.form_submit_button("💾 บันทึกลูกค้า", use_container_width=True)
+            customer_submitted = st.form_submit_button("บันทึกลูกค้า", use_container_width=True)
 
         if customer_submitted:
             new_id, error = customer_entry.create_customer(
@@ -146,13 +146,13 @@ with tab_customer:
                 )
 
     st.divider()
-    st.subheader("✏️ แก้ไข / ลบ ลูกค้า")
+    st.subheader("แก้ไข / ลบ ลูกค้า")
 
     if not customers:
         st.info("ยังไม่มีข้อมูลลูกค้าในระบบ")
     else:
         search = st.text_input(
-            "🔍 ค้นหาลูกค้าที่ต้องการแก้ไข", placeholder="ชื่อ หรือ เบอร์โทร", key="_edit_c_search"
+            "ค้นหาลูกค้าที่ต้องการแก้ไข", placeholder="ชื่อ หรือ เบอร์โทร", key="_edit_c_search"
         )
         matches = customers
         if search:
@@ -204,7 +204,7 @@ with tab_customer:
                         ed_postcode = st.text_input("รหัสไปรษณีย์", value=picked["postcode"] or "")
                     ed_country = st.text_input("ประเทศ", value=picked["country"] or "Thailand")
 
-                edit_submitted = st.form_submit_button("💾 บันทึกการแก้ไข", use_container_width=True)
+                edit_submitted = st.form_submit_button("บันทึกการแก้ไข", use_container_width=True)
 
             if edit_submitted:
                 error = customer_entry.update_customer(
@@ -231,17 +231,17 @@ with tab_customer:
                         f"บันทึกการแก้ไข **{ed_first.strip()} {ed_last.strip()}** เรียบร้อยแล้ว"
                     )
 
-            st.markdown("**🗑 ลบลูกค้า (ซ่อนไว้ — กู้คืนได้)**")
+            st.markdown("**ลบลูกค้า (ซ่อนไว้ — กู้คืนได้)**")
             st.caption(
                 "ข้อมูลจะไม่ถูกลบออกจากฐานข้อมูล แต่จะถูกซ่อนพร้อมทะเบียนรับประกันของลูกค้ารายนี้ "
-                "และบันทึกลงประวัติว่าใครซ่อนเมื่อไหร่ — กู้คืนได้ที่แท็บ 🗄 รายการที่ซ่อนไว้ "
+                "และบันทึกลงประวัติว่าใครซ่อนเมื่อไหร่ — กู้คืนได้ที่แท็บ “รายการที่ซ่อนไว้” "
                 "ส่วนสาย เคส และการเชื่อมสายยังอยู่ครบ"
             )
             confirm_hide = st.checkbox(
                 f"ยืนยันซ่อน `{picked['first_name']} {picked['last_name']}`",
                 key=f"_confirm_delete_customer_{cid}",
             )
-            if st.button("🗑 ลบลูกค้ารายนี้", key=f"_delete_customer_{cid}", disabled=not confirm_hide):
+            if st.button("ลบลูกค้ารายนี้", key=f"_delete_customer_{cid}", disabled=not confirm_hide):
                 result, error = customer_entry.hide_customer(
                     cid, actor=current_user, actor_role=current_role
                 )
@@ -277,14 +277,14 @@ with tab_warranty:
     warranties = db.get_all_warranties()
 
     if not customers:
-        st.warning("ต้องมีลูกค้าในระบบก่อน — เพิ่มลูกค้าที่แท็บ 👤 ลูกค้า ก่อนบันทึกทะเบียนรับประกัน")
+        st.warning("ต้องมีลูกค้าในระบบก่อน — เพิ่มลูกค้าที่แท็บ “ลูกค้า” ก่อนบันทึกทะเบียนรับประกัน")
     else:
         cust_map = {
             _customer_label(c): c["id"]
             for c in sorted(customers, key=lambda c: (c["last_name"], c["first_name"]))
         }
 
-        with st.expander("➕ เพิ่มทะเบียนรับประกันใหม่", expanded=not warranties):
+        with st.expander("เพิ่มทะเบียนรับประกันใหม่", expanded=not warranties):
             picked_customer = st.selectbox(
                 "ลูกค้าเจ้าของทะเบียน *", list(cust_map.keys()), key="_w_customer"
             )
@@ -325,7 +325,7 @@ with tab_warranty:
             remark = st.text_area("หมายเหตุ", height=80)
 
             st.caption("* จำเป็นต้องกรอก — เลขทะเบียนต้องไม่ซ้ำกับรายการเดิม")
-            if st.button("💾 บันทึกทะเบียนรับประกัน", use_container_width=True):
+            if st.button("บันทึกทะเบียนรับประกัน", use_container_width=True):
                 new_id, error = customer_entry.create_warranty(
                     actor=current_user,
                     actor_role=current_role,
@@ -356,13 +356,13 @@ with tab_warranty:
                     )
 
         st.divider()
-        st.subheader("✏️ แก้ไข / ลบ ทะเบียนรับประกัน")
+        st.subheader("แก้ไข / ลบ ทะเบียนรับประกัน")
 
         if not warranties:
             st.info("ยังไม่มีทะเบียนรับประกันในระบบ")
         else:
             w_search = st.text_input(
-                "🔍 ค้นหาทะเบียนที่ต้องการแก้ไข",
+                "ค้นหาทะเบียนที่ต้องการแก้ไข",
                 placeholder="เลขทะเบียน, Serial, แบรนด์, รุ่น หรือชื่อลูกค้า",
                 key="_edit_w_search",
             )
@@ -469,7 +469,7 @@ with tab_warranty:
                     "หมายเหตุ", value=picked_w["remark"] or "", height=80, key=f"_ew_remark_{wid}"
                 )
 
-                if st.button("💾 บันทึกการแก้ไข", key=f"_save_w_{wid}", use_container_width=True):
+                if st.button("บันทึกการแก้ไข", key=f"_save_w_{wid}", use_container_width=True):
                     error = customer_entry.update_warranty(
                         wid,
                         actor=current_user,
@@ -498,7 +498,7 @@ with tab_warranty:
                     else:
                         _flash_and_rerun(f"บันทึกการแก้ไขทะเบียน **{ed_reg.strip()}** เรียบร้อยแล้ว")
 
-                st.markdown("**🗑 ลบทะเบียนรับประกัน (ซ่อนไว้ — กู้คืนได้)**")
+                st.markdown("**ลบทะเบียนรับประกัน (ซ่อนไว้ — กู้คืนได้)**")
                 st.caption(
                     "แถวนี้จะยังอยู่ในฐานข้อมูล แต่ถูกซ่อนจากทุกหน้า และบันทึกลงประวัติว่าใครซ่อน"
                 )
@@ -506,7 +506,7 @@ with tab_warranty:
                     f"ยืนยันซ่อนทะเบียน `{picked_w['registration_no']}`",
                     key=f"_confirm_delete_w_{wid}",
                 )
-                if st.button("🗑 ลบทะเบียนนี้", key=f"_delete_w_{wid}", disabled=not confirm_w):
+                if st.button("ลบทะเบียนนี้", key=f"_delete_w_{wid}", disabled=not confirm_w):
                     error = customer_entry.hide_warranty(
                         wid, actor=current_user, actor_role=current_role
                     )
@@ -543,7 +543,7 @@ with tab_hidden:
     hidden_customers = db.get_deleted_customers()
     hidden_warranties = db.get_deleted_warranties()
 
-    st.subheader(f"👤 ลูกค้าที่ซ่อนไว้ ({len(hidden_customers)})")
+    st.subheader(f"ลูกค้าที่ซ่อนไว้ ({len(hidden_customers)})")
     if not hidden_customers:
         st.info("ไม่มีลูกค้าที่ถูกซ่อนไว้")
     for row in hidden_customers:
@@ -553,7 +553,7 @@ with tab_hidden:
         )
         cols[1].caption(f"ซ่อนโดย: {row['deleted_by'] or '—'}")
         cols[2].caption(f"เมื่อ: {(row['deleted_at'] or '')[:19].replace('T', ' ')}")
-        if cols[3].button("♻️ กู้คืน", key=f"_restore_c_{row['id']}", use_container_width=True):
+        if cols[3].button("กู้คืน", key=f"_restore_c_{row['id']}", use_container_width=True):
             result, error = customer_entry.restore_customer(
                 row["id"], actor=current_user, actor_role=current_role
             )
@@ -567,7 +567,7 @@ with tab_hidden:
                 )
 
     st.divider()
-    st.subheader(f"🛡 ทะเบียนรับประกันที่ซ่อนไว้ ({len(hidden_warranties)})")
+    st.subheader(f"ทะเบียนรับประกันที่ซ่อนไว้ ({len(hidden_warranties)})")
     if not hidden_warranties:
         st.info("ไม่มีทะเบียนรับประกันที่ถูกซ่อนไว้")
     for row in hidden_warranties:
@@ -578,7 +578,7 @@ with tab_hidden:
         )
         cols[1].caption(f"ซ่อนโดย: {row['deleted_by'] or '—'}")
         cols[2].caption(f"เมื่อ: {(row['deleted_at'] or '')[:19].replace('T', ' ')}")
-        if cols[3].button("♻️ กู้คืน", key=f"_restore_w_{row['id']}", use_container_width=True):
+        if cols[3].button("กู้คืน", key=f"_restore_w_{row['id']}", use_container_width=True):
             error = customer_entry.restore_warranty(
                 row["id"], actor=current_user, actor_role=current_role
             )

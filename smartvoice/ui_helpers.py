@@ -219,7 +219,7 @@ def render_login_page():
     """Full-page login form — the only screen an anonymous visitor can reach."""
     _, center, _ = st.columns([1, 1.4, 1])
     with center:
-        st.markdown("## 🔑 เข้าสู่ระบบ SmartVoice")
+        st.markdown("## เข้าสู่ระบบ SmartVoice")
         st.caption("ระบบวิเคราะห์สายสนทนา Call Center — กรุณาเข้าสู่ระบบด้วยบัญชีพนักงาน")
 
         locked_for = _login_lock_remaining()
@@ -233,7 +233,7 @@ def render_login_page():
             username = st.text_input("Username", key="_login_username")
             password = st.text_input("Password", type="password", key="_login_password")
             submitted = st.form_submit_button(
-                "✅ เข้าสู่ระบบ", use_container_width=True, disabled=bool(locked_for)
+                "เข้าสู่ระบบ", use_container_width=True, disabled=bool(locked_for)
             )
 
         if submitted and not locked_for:
@@ -273,18 +273,18 @@ def render_sidebar_account():
     if not user:
         return
     with st.sidebar:
-        st.success(f"👤 **{user}**  \n_{role_label(role)}_")
+        st.success(f"**{user}**  \n_{role_label(role)}_")
         render_change_password()
-        if st.button("🚪 ออกจากระบบ", use_container_width=True, key="_logout_btn"):
+        if st.button("ออกจากระบบ", use_container_width=True, key="_logout_btn"):
             end_session()
             st.rerun()
         if role == "Admin" and default_admin_password_unchanged():
-            st.warning("⚠️ บัญชี `admin` ยังใช้รหัสผ่านเริ่มต้น — เปลี่ยนได้ที่ 🔐 เปลี่ยนรหัสผ่าน ด้านบน")
+            st.warning("บัญชี `admin` ยังใช้รหัสผ่านเริ่มต้น — เปลี่ยนได้ที่ เปลี่ยนรหัสผ่าน ด้านบน")
 
 
 def render_change_password():
     """Self-service password change — same box on every page, for every role."""
-    with st.popover("🔐 เปลี่ยนรหัสผ่าน", use_container_width=True):
+    with st.popover("เปลี่ยนรหัสผ่าน", use_container_width=True):
         user_id = get_current_user_id()
         if user_id is None:
             # .env accounts have no `users` row to update.
@@ -343,11 +343,11 @@ def require_page(page_key: str) -> tuple[str, str]:
     """
     user, role = get_current_user()
     if not user:
-        st.warning("🔒 กรุณาเข้าสู่ระบบก่อนใช้งาน")
+        st.warning("กรุณาเข้าสู่ระบบก่อนใช้งาน")
         st.stop()
     if not can_access(role, page_key):
         st.error(
-            f"⛔ บทบาท **{role_label(role)}** ไม่มีสิทธิ์เข้าหน้า "
+            f"บทบาท **{role_label(role)}** ไม่มีสิทธิ์เข้าหน้า "
             f"**{PAGE_LABELS_TH.get(page_key, page_key)}**"
         )
         st.stop()
@@ -359,10 +359,10 @@ def render_sidebar_info():
     with st.sidebar:
         st.markdown("---")
         if MOCK_STT:
-            st.caption("STT Mode: **🧪 Mock STT**")
+            st.caption("STT Mode: **Mock STT**")
         else:
             short = WHISPER_MODEL.split("/")[-1] if "/" in WHISPER_MODEL else WHISPER_MODEL
-            st.caption(f"STT Mode: **🎙 Whisper ({short})**")
+            st.caption(f"STT Mode: **Whisper ({short})**")
         st.caption(f"LLM: `{OLLAMA_MODEL}`")
 
 
@@ -393,7 +393,7 @@ def init_page(page_key: str) -> tuple[str, str]:
 # ── Badge / emoji helpers ────────────────────────────────────────────────
 
 def sentiment_emoji(s: str) -> str:
-    return {"positive": "😊 Positive", "neutral": "😐 Neutral", "negative": "😠 Negative"}.get(
+    return {"positive": "Positive", "neutral": "Neutral", "negative": "Negative"}.get(
         s or "", "—"
     )
 

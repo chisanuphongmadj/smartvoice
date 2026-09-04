@@ -1,7 +1,7 @@
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Customers", page_icon="👥", layout="wide")
+st.set_page_config(page_title="SmartVoice — Customers", layout="wide")
 
 from smartvoice import db
 from smartvoice.auth import PAGE_CUSTOMERS
@@ -12,9 +12,9 @@ init_page(PAGE_CUSTOMERS)
 # ─────────────────────────────────────────
 # PAGE: CUSTOMERS & WARRANTY
 # ─────────────────────────────────────────
-st.title("👥 Customers & Warranty")
+st.title("Customers & Warranty")
 
-tab1, tab2 = st.tabs(["👤 ลูกค้า", "🛡 ทะเบียนรับประกัน"])
+tab1, tab2 = st.tabs(["ลูกค้า", "ทะเบียนรับประกัน"])
 
 with tab1:
     customers = db.get_all_customers()
@@ -25,7 +25,7 @@ with tab1:
         )
     else:
         st.caption(f"ทั้งหมด {len(customers)} ราย")
-        search = st.text_input("🔍 ค้นหาชื่อ / เบอร์", placeholder="สมชาย หรือ 0812345601")
+        search = st.text_input("ค้นหาชื่อ / เบอร์", placeholder="สมชาย หรือ 0812345601")
         if search:
             q = search.lower()
             customers = [c for c in customers if q in (c["first_name"] + c["last_name"] + (c["phone"] or "")).lower()]
@@ -69,8 +69,8 @@ with tab1:
             # ── Cases of this customer ──
             cases = db.get_cases_by_customer(c["id"])
             if cases:
-                _case_badge = {"open": "🟢 เปิด", "follow_up": "🟡 ติดตาม", "closed": "🔴 ปิด"}
-                st.markdown(f"**📂 เคส ({len(cases)} เคส):**")
+                _case_badge = {"open": "เปิด", "follow_up": "ติดตาม", "closed": "ปิด"}
+                st.markdown(f"**เคส ({len(cases)} เคส):**")
                 for cs in cases:
                     case_calls = db.get_calls_by_case(cs["id"])
                     badge = _case_badge.get(cs["status"], cs["status"])
@@ -81,7 +81,7 @@ with tab1:
                         if case_calls:
                             for oc in case_calls:
                                 st.markdown(
-                                    f"- 🎵 `{oc['filename']}`  "
+                                    f"- `{oc['filename']}`  "
                                     f"({oc['status']}) — {(oc.get('summary') or '—')[:100]}"
                                 )
 
@@ -90,9 +90,9 @@ with tab1:
             if all_calls:
                 linked_no_case = [cl for cl in all_calls if not cl.get("case_id")]
                 if linked_no_case:
-                    st.markdown(f"**🎵 สายที่เชื่อมไว้แต่ยังไม่มีเคส ({len(linked_no_case)}):**")
+                    st.markdown(f"**สายที่เชื่อมไว้แต่ยังไม่มีเคส ({len(linked_no_case)}):**")
                     for cl in linked_no_case:
-                        _badge = "🤖 Auto" if cl.get("matched_by") == "auto_phone" else "✋ Manual"
+                        _badge = "จับคู่อัตโนมัติ" if cl.get("matched_by") == "auto_phone" else "จับคู่เอง"
                         st.caption(f"- `{cl['filename']}` ({cl['status']}) {_badge}")
 
 with tab2:
@@ -104,7 +104,7 @@ with tab2:
 
         # ── Search bar ──
         w_search = st.text_input(
-            "🔍 ค้นหาทะเบียนรับประกัน",
+            "ค้นหาทะเบียนรับประกัน",
             placeholder="ชื่อลูกค้า, เบอร์, เลขทะเบียน, Serial, แบรนด์, รุ่น ...",
             key="warranty_search",
         )

@@ -160,7 +160,7 @@ streamlit run Home.py
 
 ขั้นตอนหลัง login ครั้งแรก:
 
-1. sidebar → กล่องบัญชี → `🔐 เปลี่ยนรหัสผ่าน` (คำเตือนใน sidebar จะหายไปเมื่อเปลี่ยนแล้ว)
+1. sidebar → กล่องบัญชี → `เปลี่ยนรหัสผ่าน` (คำเตือนใน sidebar จะหายไปเมื่อเปลี่ยนแล้ว)
 2. sidebar → `จัดการผู้ใช้` → เพิ่มบัญชีพนักงานพร้อมกำหนด role
 
 รหัสผ่านทั้งหมดถูกเก็บเป็น PBKDF2-SHA256 ในตาราง `users` ไม่มีการเก็บ plaintext
@@ -241,7 +241,7 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-สถานะล่าสุดที่ยืนยันแล้ว: `301 passed` (ทดสอบเมื่อ 2026-09-04)
+สถานะล่าสุดที่ยืนยันแล้ว: `302 passed` (ทดสอบเมื่อ 2026-09-04)
 
 ---
 

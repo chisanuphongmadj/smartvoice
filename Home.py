@@ -11,7 +11,6 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Thai Call Analytics",
-    page_icon="🎙️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -45,7 +44,7 @@ bootstrap_app()
 # ── Home page ────────────────────────────────────────────────────────────
 
 def home_page():
-    st.title("🎙️ Thai Call Analytics")
+    st.title("Thai Call Analytics")
     st.markdown("**AI-powered Call Center Analytics for Thai Customer Calls** — transcribes Thai audio, diarizes speakers, and runs LLM quality analysis.")
 
     user, role = get_current_user()
@@ -71,7 +70,7 @@ def home_page():
         st.markdown(metric_card(pending, "Pending", "#eab308"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.info("👈 เลือกหน้าจาก sidebar เพื่อเริ่มใช้งาน")
+    st.info("เลือกหน้าจาก sidebar เพื่อเริ่มใช้งาน")
 
     with st.expander("Deployment readiness", expanded=False):
         checks = run_preflight_checks()
@@ -87,14 +86,14 @@ def home_page():
 # ── Navigation ───────────────────────────────────────────────────────────
 
 _PAGE_SPECS = {
-    PAGE_HOME: dict(page=home_page, title="หน้าแรก", icon="🎙️", url_path="home", default=True),
-    PAGE_ADMIN: dict(page="pages/1_📤_Admin.py", title="Admin", icon="📤", url_path="admin"),
-    PAGE_DASHBOARD: dict(page="pages/2_📊_Dashboard.py", title="Dashboard", icon="📊", url_path="dashboard"),
-    PAGE_CUSTOMERS: dict(page="pages/3_👥_Customers.py", title="Customers", icon="👥", url_path="customers"),
-    PAGE_DATA_ENTRY: dict(page="pages/6_➕_Data_Entry.py", title="เพิ่มข้อมูล", icon="➕", url_path="data-entry"),
-    PAGE_AUDIT: dict(page="pages/7_📜_Audit_Log.py", title="ประวัติการใช้งาน", icon="📜", url_path="audit-log"),
-    PAGE_SETTINGS: dict(page="pages/4_Settings.py", title="Settings", icon="⚙️", url_path="settings"),
-    PAGE_USERS: dict(page="pages/5_👤_Users.py", title="จัดการผู้ใช้", icon="👤", url_path="users"),
+    PAGE_HOME: dict(page=home_page, title="หน้าแรก", url_path="home", default=True),
+    PAGE_ADMIN: dict(page="pages/1_📤_Admin.py", title="Admin", url_path="admin"),
+    PAGE_DASHBOARD: dict(page="pages/2_📊_Dashboard.py", title="Dashboard", url_path="dashboard"),
+    PAGE_CUSTOMERS: dict(page="pages/3_👥_Customers.py", title="Customers", url_path="customers"),
+    PAGE_DATA_ENTRY: dict(page="pages/6_➕_Data_Entry.py", title="เพิ่มข้อมูล", url_path="data-entry"),
+    PAGE_AUDIT: dict(page="pages/7_📜_Audit_Log.py", title="ประวัติการใช้งาน", url_path="audit-log"),
+    PAGE_SETTINGS: dict(page="pages/4_Settings.py", title="Settings", url_path="settings"),
+    PAGE_USERS: dict(page="pages/5_👤_Users.py", title="จัดการผู้ใช้", url_path="users"),
 }
 
 
@@ -106,7 +105,7 @@ _user, _role = get_current_user()
 
 if not _user:
     # Anonymous visitors get exactly one page and no sidebar menu.
-    login = st.Page(render_login_page, title="เข้าสู่ระบบ", icon="🔑", url_path="login", default=True)
+    login = st.Page(render_login_page, title="เข้าสู่ระบบ", url_path="login", default=True)
     st.navigation([login], position="hidden").run()
     st.stop()
 

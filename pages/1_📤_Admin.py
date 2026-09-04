@@ -3,7 +3,7 @@ import os
 
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Admin", page_icon="📤", layout="wide")
+st.set_page_config(page_title="SmartVoice — Admin", layout="wide")
 
 from smartvoice import audit as audit_trail
 from smartvoice import db, file_manager
@@ -26,14 +26,14 @@ _current_user, _current_role = init_page(PAGE_ADMIN)
 # ─────────────────────────────────────────
 # PAGE: ADMIN — Upload & Process
 # ─────────────────────────────────────────
-st.title("📤 Admin — Upload & Process")
+st.title("Admin — อัปโหลดและประมวลผล")
 
 st.caption(f"กำลังเข้าสู่ระบบในชื่อ **{_current_user}** — _{role_label(_current_role)}_ — ไฟล์ที่อัพโหลดจะถูกบันทึกชื่อผู้อัพโหลด")
 
 # Upload section
-st.subheader("1. Upload Audio Files")
+st.subheader("1. อัปโหลดไฟล์เสียง")
 uploaded_files = st.file_uploader(
-    "Drop .wav or .mp3 files here",
+    "ลากไฟล์ .wav หรือ .mp3 มาวางที่นี่",
     type=["wav", "mp3"],
     accept_multiple_files=True,
 )
@@ -48,7 +48,7 @@ if uploaded_files:
 
             is_valid, err_msg = file_manager.validate_upload(file_bytes, safe_name)
             if not is_valid:
-                st.warning(f"⚠️ `{safe_name}` — {err_msg}")
+                st.warning(f"`{safe_name}` — {err_msg}")
                 continue
 
             file_hash = file_manager.compute_file_hash(file_bytes)
@@ -58,9 +58,9 @@ if uploaded_files:
                 if existing["status"] == "error":
                     db.update_call_status(existing["id"], "uploaded", error_msg=None)
                     db.update_processing_step(existing["id"], None)
-                    st.warning(f"⚠️ `{safe_name}` มีอยู่แล้ว (status: error) — reset เป็น Pending แล้ว")
+                    st.warning(f"`{safe_name}` มีอยู่แล้ว (สถานะ: ผิดพลาด) — ตั้งกลับเป็นรอประมวลผลแล้ว")
                 else:
-                    st.info(f"ℹ️ `{safe_name}` already exists (duplicate), skipped.")
+                    st.info(f"`{safe_name}` มีอยู่แล้ว (ไฟล์ซ้ำ) — ข้ามไฟล์นี้")
                 continue
 
             saved_path = file_manager.save_audio_file(file_bytes, safe_name, file_hash)
@@ -84,19 +84,19 @@ if uploaded_files:
                 link_info = db.auto_link_call_by_phone(call_id, phone)
                 if link_info:
                     st.success(
-                        f"✅ `{safe_name}` uploaded — 🔗 เชื่อมอัตโนมัติกับ "
-                        f"**{link_info['customer_name']}** (📞 {phone})"
-                        + (f" + Warranty #{link_info['warranty_id']}" if link_info['warranty_id'] else "")
+                        f"อัปโหลด `{safe_name}` แล้ว — เชื่อมอัตโนมัติกับ "
+                        f"**{link_info['customer_name']}** (เบอร์ {phone})"
+                        + (f" + ทะเบียนรับประกัน #{link_info['warranty_id']}" if link_info['warranty_id'] else "")
                     )
                 else:
-                    st.success(f"✅ `{safe_name}` uploaded — 📞 เบอร์ `{phone}` (ไม่พบลูกค้าในระบบ)")
+                    st.success(f"อัปโหลด `{safe_name}` แล้ว — เบอร์ `{phone}` (ไม่พบลูกค้าในระบบ)")
             else:
-                st.success(f"✅ `{safe_name}` uploaded and registered.")
+                st.success(f"อัปโหลด `{safe_name}` และบันทึกเข้าระบบแล้ว")
 
 st.divider()
 
 # Processing section
-st.subheader("2. Process Calls")
+st.subheader("2. ประมวลผลสาย")
 
 # ── Scale-friendly counts: SQL aggregate so it stays fast at 10K+ rows ─────
 # (the Admin list below is capped to "latest N" via a user picker — these
@@ -116,27 +116,27 @@ if processing_blocked:
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.markdown(metric_card(_counts["uploaded"], "Pending"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["uploaded"], "รอประมวลผล"), unsafe_allow_html=True)
 with col2:
-    st.markdown(metric_card(_counts["processing"], "Processing"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["processing"], "กำลังประมวลผล"), unsafe_allow_html=True)
 with col3:
-    st.markdown(metric_card(_counts["done"], "Done"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["done"], "เสร็จแล้ว"), unsafe_allow_html=True)
 with col4:
-    st.markdown(metric_card(_counts["error"], "Errors"), unsafe_allow_html=True)
+    st.markdown(metric_card(_counts["error"], "ผิดพลาด"), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 col_a, col_b = st.columns([1, 3])
 with col_a:
     process_all_btn = st.button(
-        "▶ Process All Pending",
+        "ประมวลผลทั้งหมดที่รออยู่",
         disabled=_counts["uploaded"] == 0 or processing_blocked,
         use_container_width=True,
         type="primary",
     )
 with col_b:
     if _counts["uploaded"] == 0:
-        st.info("No pending calls to process.")
+        st.info("ไม่มีสายที่รอประมวลผล")
 
 if process_all_btn and _counts["uploaded"] > 0:
     # Lazy fetch — only the IDs we need, and only when the button is clicked
@@ -153,7 +153,7 @@ if _orphan_count > 0:
     orph_col1, orph_col2 = st.columns([1, 3])
     with orph_col1:
         if st.button(
-            f"🧹 ล้างเคสค้าง ({_orphan_count})",
+            f"ล้างเคสค้าง ({_orphan_count})",
             use_container_width=True,
             help="ลบเคสที่ไม่มีสายชี้มา (เกิดจากการลบไฟล์เสียงก่อนหน้า)",
         ):
@@ -161,14 +161,14 @@ if _orphan_count > 0:
             st.success(f"ลบ {removed} เคสที่ค้างเรียบร้อยแล้ว")
             st.rerun()
     with orph_col2:
-        st.caption(f"⚠️ พบ {_orphan_count} เคสที่ไม่มีสายอ้างอิง (orphan) — กดปุ่มซ้ายเพื่อล้าง")
+        st.caption(f"พบ {_orphan_count} เคสที่ไม่มีสายอ้างอิง (orphan) — กดปุ่มซ้ายเพื่อล้าง")
 
 st.divider()
 
 # Individual call actions
-st.subheader("3. Individual Call Actions")
+st.subheader("3. จัดการสายรายไฟล์")
 if _counts["total"] == 0:
-    st.caption("No calls uploaded yet.")
+    st.caption("ยังไม่มีสายที่อัปโหลดเข้ามา")
 else:
     # ── Load-limit picker (ops-focused: usually browsing recent uploads) ──
     # บริษัทมีไฟล์เสียงเป็นหมื่นๆ ไฟล์ — โหลดทั้งหมดทุกครั้งจะหน่วงระบบ
@@ -225,7 +225,7 @@ else:
     tbar_search, tbar_status, tbar_sort = st.columns([2, 2, 1])
     with tbar_search:
         q = st.text_input(
-            "🔍 ค้นหา",
+            "ค้นหา",
             key="_call_search",
             placeholder="ชื่อไฟล์ / เบอร์ / ผู้อัพโหลด",
             label_visibility="collapsed",
@@ -233,7 +233,7 @@ else:
     with tbar_status:
         status_filter = st.radio(
             "สถานะ",
-            ["ทั้งหมด", "Pending", "Processing", "Done", "Error"],
+            ["ทั้งหมด", "รอประมวลผล", "กำลังประมวลผล", "เสร็จแล้ว", "ผิดพลาด"],
             horizontal=True,
             key="_call_status_filter",
             label_visibility="collapsed",
@@ -250,7 +250,7 @@ else:
     # Omazz CDR system tags every file this way; no DB column needed.
     direction_filter = st.radio(
         "ทิศทางสาย",
-        ["ทั้งหมด", "📥 Inbound (สายเข้า)", "📤 Outbound (สายออก)"],
+        ["ทั้งหมด", "สายเข้า (Inbound)", "สายออก (Outbound)"],
         horizontal=True,
         key="_call_direction_filter",
         label_visibility="collapsed",
@@ -258,12 +258,12 @@ else:
 
     # Apply filter
     _status_map = {
-        "Pending": "uploaded", "Processing": "processing",
-        "Done": "done", "Error": "error",
+        "รอประมวลผล": "uploaded", "กำลังประมวลผล": "processing",
+        "เสร็จแล้ว": "done", "ผิดพลาด": "error",
     }
     _direction_map = {
-        "📥 Inbound (สายเข้า)": "inbound",
-        "📤 Outbound (สายออก)": "outbound",
+        "สายเข้า (Inbound)": "inbound",
+        "สายออก (Outbound)": "outbound",
     }
     filtered_calls = refresh_calls
     if status_filter != "ทั้งหมด":
@@ -306,7 +306,7 @@ else:
     # Result summary
     st.caption(
         f"พบ **{len(filtered_calls)}** / {len(refresh_calls)} ไฟล์"
-        + (f"  •  🔍 `{q}`" if q else "")
+        + (f"  •  `{q}`" if q else "")
         + (f"  •  สถานะ: **{status_filter}**" if status_filter != "ทั้งหมด" else "")
         + (f"  •  ทิศทาง: **{direction_filter}**" if direction_filter != "ทั้งหมด" else "")
     )
@@ -314,13 +314,13 @@ else:
     # ── Bulk actions ──────────────────────────────────────────────────────
     bulk_col1, bulk_col2, bulk_col3 = st.columns([1, 1, 2])
     with bulk_col1:
-        if st.button("☑ Select All (ที่กรองอยู่)", use_container_width=True):
+        if st.button("เลือกทั้งหมด (ที่กรองอยู่)", use_container_width=True):
             st.session_state.selected_calls = {c["id"] for c in filtered_calls}
             for c in filtered_calls:
                 st.session_state[f"chk_{c['id']}"] = True
             st.rerun()
     with bulk_col2:
-        if st.button("☐ Deselect All", use_container_width=True):
+        if st.button("ยกเลิกการเลือกทั้งหมด", use_container_width=True):
             st.session_state.selected_calls = set()
             for c in refresh_calls:
                 st.session_state[f"chk_{c['id']}"] = False
@@ -328,7 +328,7 @@ else:
     with bulk_col3:
         selected_count = len(st.session_state.selected_calls)
         delete_selected_btn = st.button(
-            f"🗑 Delete Selected ({selected_count})",
+            f"ลบที่เลือกไว้ ({selected_count})",
             disabled=selected_count == 0,
             use_container_width=True,
             type="secondary",
@@ -373,10 +373,11 @@ else:
             return name
         return f"{name[:head]}…{name[-tail:]}"
 
-    # Status → emoji badge for expander title
-    _st_icon = {
-        "uploaded": "🟣 PENDING", "processing": "🔵 PROCESSING",
-        "done": "🟢 DONE", "error": "🔴 ERROR",
+    # Status word for the expander title — no icons: the label has to read the
+    # same as the status filter above it.
+    _st_label = {
+        "uploaded": "รอประมวลผล", "processing": "กำลังประมวลผล",
+        "done": "เสร็จแล้ว", "error": "ผิดพลาด",
     }
 
     for call in visible_calls:
@@ -384,13 +385,13 @@ else:
         if call["id"] in st.session_state.get("just_launched", set()):
             _eff_st = "processing"
         _phone = call.get("customer_phone") or ""
-        _phone_tag = f"  📞 {_phone}" if _phone else ""
+        _phone_tag = f"  •  เบอร์: {_phone}" if _phone else ""
         _date_short = (call.get("created_at") or "")[:10]
         _uploader_short = call.get("uploaded_by") or "—"
         _hdr_name = _shrink_name(call["filename"])
         _hdr = (
-            f"🎵 {_hdr_name}  —  {_st_icon.get(_eff_st, _eff_st.upper())}"
-            f"{_phone_tag}  •  📅 {_date_short}  •  👤 {_uploader_short}"
+            f"ไฟล์: {_hdr_name}  —  สถานะ: {_st_label.get(_eff_st, _eff_st)}"
+            f"{_phone_tag}  •  วันที่: {_date_short}  •  ผู้อัปโหลด: {_uploader_short}"
         )
         with st.expander(_hdr):
             chk_col, info_col, action_col = st.columns([0.3, 2, 1])
@@ -410,18 +411,18 @@ else:
                 _uploader_role = call.get('uploaded_by_role') or ""
                 _uploader_label = f"{_uploader} ({_uploader_role})" if _uploader_role else _uploader
                 st.markdown(
-                    f"**📤 Uploaded:** {_uploaded_ts} UTC &nbsp;•&nbsp; "
+                    f"**อัปโหลดเมื่อ:** {_uploaded_ts} UTC &nbsp;•&nbsp; "
                     f"**โดย:** {_uploader_label}"
                 )
                 st.markdown(
-                    f"**Status:** {status_badge(_eff_st)}",
+                    f"**สถานะ:** {status_badge(_eff_st)}",
                     unsafe_allow_html=True,
                 )
                 if _eff_st == "processing":
                     step = call.get("processing_step") or "กำลังเริ่มต้น..."
                     updated = call.get("updated_at", "")[:19].replace("T", " ")
                     st.markdown(
-                        f'<div style="color:#93c5fd;font-size:0.85rem;margin-top:4px">⏳ {step}</div>'
+                        f'<div style="color:#93c5fd;font-size:0.85rem;margin-top:4px">{step}</div>'
                         f'<div style="color:#6b7280;font-size:0.75rem">อัปเดตล่าสุด: {updated} UTC</div>',
                         unsafe_allow_html=True,
                     )
@@ -431,8 +432,8 @@ else:
                 # Customer & Warranty context
                 cust_link = db.get_call_customer_link(call["id"])
                 if cust_link:
-                    _match_badge = "🤖 Auto" if cust_link.get("matched_by") == "auto_phone" else "✋ Manual"
-                    with st.expander(f"👤 ข้อมูลลูกค้า & รับประกัน ({_match_badge})"):
+                    _match_badge = "จับคู่อัตโนมัติ" if cust_link.get("matched_by") == "auto_phone" else "จับคู่เอง"
+                    with st.expander(f"ข้อมูลลูกค้า & รับประกัน ({_match_badge})"):
                         cc1, cc2 = st.columns(2)
                         with cc1:
                             st.markdown("**ลูกค้า**")
@@ -450,7 +451,7 @@ else:
                                 months = cust_link.get("warranty_period_months", 0)
                                 st.markdown(f"ระยะประกัน: {months} เดือน ({months//12} ปี)")
                 else:
-                    with st.expander("👤 เชื่อมข้อมูลลูกค้า"):
+                    with st.expander("เชื่อมข้อมูลลูกค้า"):
                         all_custs = db.get_all_customers()
                         if all_custs:
                             cust_options = {f"{c['first_name']} {c['last_name']} ({c['phone'] or '-'})": c["id"] for c in all_custs}
@@ -460,7 +461,7 @@ else:
                                 warrs = db.get_warranties_by_customer(cid)
                                 warr_options = {f"{w['registration_no']} — {w['brand']} {w['model']}": w["id"] for w in warrs}
                                 wsel = st.selectbox("เลือก Warranty (ถ้ามี)", ["— ไม่ระบุ —"] + list(warr_options.keys()), key=f"warr_sel_{call['id']}")
-                                if st.button("🔗 เชื่อม", key=f"link_btn_{call['id']}"):
+                                if st.button("เชื่อมข้อมูล", key=f"link_btn_{call['id']}"):
                                     wid = warr_options.get(wsel) if wsel != "— ไม่ระบุ —" else None
                                     db.link_call_customer(call["id"], cid, wid, matched_by="manual")
                                     audit(
@@ -477,14 +478,14 @@ else:
                 if call.get("case_id"):
                     case = db.get_case_by_id(call["case_id"])
                     if case:
-                        _case_status_map = {"open": "🟢 เปิด", "follow_up": "🟡 ติดตาม", "closed": "🔴 ปิด"}
+                        _case_status_map = {"open": "เปิด", "follow_up": "ติดตาม", "closed": "ปิด"}
                         _cs = _case_status_map.get(case["status"], case["status"])
                         sibling_calls = db.get_calls_by_case(case["id"])
-                        with st.expander(f"📂 เคส #{case['id']}: {case['subject']}  —  {_cs}  ({len(sibling_calls)} สาย)"):
+                        with st.expander(f"เคส #{case['id']}: {case['subject']}  —  สถานะ: {_cs}  ({len(sibling_calls)} สาย)"):
                             if len(sibling_calls) > 1:
                                 for oc in sibling_calls:
-                                    _mark = "👉" if oc["id"] == call["id"] else "  ↳"
-                                    st.caption(f"{_mark} 🎵 {oc['filename']}  ({oc['status']})")
+                                    _mark = "สายนี้:" if oc["id"] == call["id"] else "  ↳"
+                                    st.caption(f"{_mark} {oc['filename']}  ({_st_label.get(oc['status'], oc['status'])})")
                             cs_col1, cs_col2 = st.columns(2)
                             with cs_col1:
                                 _status_options = ["open", "follow_up", "closed"]
@@ -493,11 +494,11 @@ else:
                                     "เปลี่ยนสถานะเคส",
                                     _status_options,
                                     index=_cur_idx,
-                                    format_func=lambda s: {"open": "🟢 เปิด", "follow_up": "🟡 ติดตาม", "closed": "🔴 ปิด"}.get(s, s),
+                                    format_func=lambda s: {"open": "เปิด", "follow_up": "ติดตาม", "closed": "ปิด"}.get(s, s),
                                     key=f"case_status_{call['id']}",
                                 )
                                 if new_status != case["status"]:
-                                    if st.button("💾 อัปเดทสถานะ", key=f"case_upd_{call['id']}"):
+                                    if st.button("บันทึกสถานะ", key=f"case_upd_{call['id']}"):
                                         db.update_case_status(case["id"], new_status)
                                         audit(
                                             audit_trail.UPDATE,
@@ -515,7 +516,7 @@ else:
                                     key=f"case_subj_{call['id']}",
                                 )
                                 if new_subject != case["subject"]:
-                                    if st.button("💾 อัปเดทหัวข้อ", key=f"case_subj_btn_{call['id']}"):
+                                    if st.button("บันทึกหัวข้อ", key=f"case_subj_btn_{call['id']}"):
                                         db.update_case_subject(case["id"], new_subject)
                                         audit(
                                             audit_trail.UPDATE,
@@ -536,7 +537,7 @@ else:
                                 ]
                                 if other_cases:
                                     st.markdown("---")
-                                    st.caption("🔗 **รวมเข้ากับเคสอื่น** (ย้ายสายทั้งหมดจากเคสนี้ไปอีกเคส)")
+                                    st.caption("**รวมเข้ากับเคสอื่น** (ย้ายสายทั้งหมดจากเคสนี้ไปอีกเคส)")
                                     merge_opts = {
                                         f"เคส #{cs['id']}: {cs['subject']} ({cs['status']})": cs["id"]
                                         for cs in other_cases
@@ -550,7 +551,7 @@ else:
                                             label_visibility="collapsed",
                                         )
                                     with m_col2:
-                                        if st.button("🔗 รวม", key=f"merge_btn_{call['id']}"):
+                                        if st.button("รวมเคส", key=f"merge_btn_{call['id']}"):
                                             dst_id = merge_opts[picked]
                                             moved = db.merge_cases(case["id"], dst_id)
                                             audit(
@@ -564,7 +565,7 @@ else:
                                             st.rerun()
 
                 if call["status"] == "done" and call.get("transcript"):
-                    with st.expander("🗣 Tagged Transcript"):
+                    with st.expander("บทสนทนาแยกผู้พูด"):
                         try:
                             mapping = json.loads(call.get("speaker_mapping") or "{}")
                         except (json.JSONDecodeError, TypeError):
@@ -612,7 +613,7 @@ else:
 
                 if effective_status in ("uploaded", "error"):
                     if st.button(
-                        "▶ Process",
+                        "ประมวลผล",
                         key=f"proc_{call['id']}",
                         use_container_width=True,
                         disabled=processing_blocked,
@@ -625,7 +626,7 @@ else:
 
                 if effective_status == "done":
                     if st.button(
-                        "🔄 Re-process",
+                        "ประมวลผลใหม่",
                         key=f"reproc_{call['id']}",
                         use_container_width=True,
                         disabled=processing_blocked,
@@ -638,7 +639,7 @@ else:
                         st.rerun()
 
                 if st.button(
-                    "🗑 Delete",
+                    "ลบไฟล์นี้",
                     key=f"del_{call['id']}",
                     use_container_width=True,
                     type="secondary",
@@ -667,7 +668,7 @@ else:
         with lm_col1:
             st.caption(f"แสดง {len(visible_calls)} / {len(filtered_calls)} ไฟล์ (เหลืออีก {_remaining})")
         with lm_col2:
-            if st.button(f"⬇ แสดงเพิ่ม ({min(PAGE_SIZE, _remaining)})", use_container_width=True):
+            if st.button(f"แสดงเพิ่ม ({min(PAGE_SIZE, _remaining)})", use_container_width=True):
                 st.session_state._call_page_size += PAGE_SIZE
                 st.rerun()
     elif len(filtered_calls) > PAGE_SIZE:
@@ -675,7 +676,7 @@ else:
         with lm_col1:
             st.caption(f"แสดงครบ {len(filtered_calls)} ไฟล์แล้ว")
         with lm_col2:
-            if st.button("⬆ ย่อกลับ", use_container_width=True):
+            if st.button("ย่อกลับ", use_container_width=True):
                 st.session_state._call_page_size = PAGE_SIZE
                 st.rerun()
 
@@ -692,7 +693,7 @@ def _auto_refresh_status():
         step = current.get("processing_step") or "กำลังเริ่มต้น..."
         remaining = len(active)
         queue_info = f" (เหลือ {remaining} ไฟล์)" if remaining > 1 else ""
-        st.info(f"⏳ กำลังประมวลผล `{current['filename'][:40]}`{queue_info}\n\n**ขั้นตอนปัจจุบัน:** {step}")
+        st.info(f"กำลังประมวลผล `{current['filename'][:40]}`{queue_info}\n\n**ขั้นตอนปัจจุบัน:** {step}")
     else:
         if st.session_state.get("_was_processing", False):
             st.session_state["_was_processing"] = False

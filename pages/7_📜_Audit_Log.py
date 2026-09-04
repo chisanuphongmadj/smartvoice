@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Audit Log", page_icon="📜", layout="wide")
+st.set_page_config(page_title="SmartVoice — Audit Log", layout="wide")
 
 from smartvoice import audit as audit_trail
 from smartvoice import db
@@ -13,7 +13,7 @@ from smartvoice.ui_helpers import init_page
 # Admin / Supervisor only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_AUDIT)
 
-st.title("📜 ประวัติการใช้งาน")
+st.title("ประวัติการใช้งาน")
 st.caption(
     "บันทึกทุกการเข้าสู่ระบบ เพิ่ม แก้ไข ลบ/ซ่อน และกู้คืน — "
     "ตารางนี้เขียนได้อย่างเดียว ไม่มีการแก้หรือลบย้อนหลังจากหน้าไหนในระบบ"
@@ -52,7 +52,7 @@ if picked_actors:
     entries = [e for e in entries if e["actor"] in picked_actors]
 
 search = st.text_input(
-    "🔍 ค้นหาในรายการ / รายละเอียด", placeholder="ชื่อลูกค้า, เลขทะเบียน, ชื่อไฟล์ ...", key="_log_search"
+    "ค้นหาในรายการ / รายละเอียด", placeholder="ชื่อลูกค้า, เลขทะเบียน, ชื่อไฟล์ ...", key="_log_search"
 )
 
 
@@ -96,13 +96,13 @@ else:
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     st.download_button(
-        "⬇️ ดาวน์โหลดเป็น CSV",
+        "ดาวน์โหลดเป็น CSV",
         data=pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig"),
         file_name="smartvoice_audit_log.csv",
         mime="text/csv",
     )
 
-with st.expander("ℹ️ ระบบบันทึกอะไรบ้าง"):
+with st.expander("ระบบบันทึกอะไรบ้าง"):
     st.markdown(
         """
 - **การเข้าใช้งาน** — เข้าสู่ระบบสำเร็จ / ไม่สำเร็จ / ออกจากระบบ

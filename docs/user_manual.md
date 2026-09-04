@@ -237,11 +237,11 @@ ollama serve
 |---|---|
 | `admin` | `admin1234` |
 
-> ⚠️ sidebar และหน้า readiness จะขึ้นเตือนตลอดจนกว่าจะเปลี่ยนรหัสผ่าน — เปลี่ยนได้ที่ **sidebar → กล่องบัญชี → 🔐 เปลี่ยนรหัสผ่าน** (ใช้ได้จากทุกหน้า)
+> ⚠️ sidebar และหน้า readiness จะขึ้นเตือนตลอดจนกว่าจะเปลี่ยนรหัสผ่าน — เปลี่ยนได้ที่ **sidebar → กล่องบัญชี → เปลี่ยนรหัสผ่าน** (ใช้ได้จากทุกหน้า)
 
 ### 5.2 การสร้างและจัดการผู้ใช้
 
-login ด้วย role **Admin** แล้วเข้าหน้า **👤 จัดการผู้ใช้** ใน sidebar:
+login ด้วย role **Admin** แล้วเข้าหน้า **จัดการผู้ใช้** ใน sidebar:
 
 - **เพิ่มผู้ใช้ใหม่** — username (a-z 0-9 . _ - อย่างน้อย 3 ตัว), ชื่อที่แสดง, บทบาท, รหัสผ่าน (อย่างน้อย 8 ตัว)
 - **แก้ไขบัญชี** — เปลี่ยนชื่อที่แสดง / บทบาท / เปิด-ปิดการใช้งาน
@@ -250,7 +250,7 @@ login ด้วย role **Admin** แล้วเข้าหน้า **👤 �
 > เปลี่ยนได้เฉพาะเจ้าตัวที่กล่องบัญชีใน sidebar และต้องกรอกรหัสผ่านเดิมก่อนเสมอ
 > สิ่งที่ Admin ทำได้คือ **เปิด / ปิด** การใช้งานบัญชี ซึ่งมีผลทันทีและย้อนกลับได้
 >
-> ระบบก็ **ไม่มีปุ่มลบบัญชีถาวร** เช่นกัน เพราะรายการใน 📜 ประวัติการใช้งาน อ้างถึงบัญชีเหล่านั้นอยู่ —
+> ระบบก็ **ไม่มีปุ่มลบบัญชีถาวร** เช่นกัน เพราะรายการใน ประวัติการใช้งาน อ้างถึงบัญชีเหล่านั้นอยู่ —
 > เลิกใช้บัญชีไหนให้ปิดใช้งานแทน
 
 ข้อจำกัดที่ระบบบังคับให้เอง:
@@ -303,7 +303,7 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...;qa1|Supervisor|pbkdf2_sha256$...
 
 ```
 ┌─ Title bar ─────────────────────────────────┐
-│ 🎙️ Thai Call Analytics                       │
+│ Thai Call Analytics                       │
 │ AI-powered Call Center Analytics for...     │
 ├─────────────────────────────────────────────┤
 │ ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐         │
@@ -311,9 +311,9 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...;qa1|Supervisor|pbkdf2_sha256$...
 │ │  X  │  │  Y  │  │  Z  │  │  W  │         │
 │ └─────┘  └─────┘  └─────┘  └─────┘         │
 ├─────────────────────────────────────────────┤
-│ 👈 เลือกหน้าจาก sidebar เพื่อเริ่มใช้งาน        │
+│ เลือกหน้าจาก sidebar เพื่อเริ่มใช้งาน        │
 ├─────────────────────────────────────────────┤
-│ ▶ Deployment readiness                      │
+│ Deployment readiness                      │
 │   (กดขยายเพื่อดู preflight checks)            │
 └─────────────────────────────────────────────┘
 ```
@@ -372,9 +372,9 @@ YYYYMMDDHHMMSS-CALLID.NNN-{AGENT|PHONE}-{PHONE|AGENT}-{Inbound|Outbound}.wav
 
 ### 7.2 Section 2 — Process Calls
 
-แสดง KPI 4 ใบ (Pending / Processing / Done / Errors) ที่ใช้ **SQL aggregate** (`COUNT(*) GROUP BY status`) — ตัวเลขแม่นเสมอแม้ตารางจะใหญ่ระดับหมื่นแถว
+แสดง KPI 4 ใบ (รอประมวลผล / กำลังประมวลผล / เสร็จแล้ว / ผิดพลาด) ที่ใช้ **SQL aggregate** (`COUNT(*) GROUP BY status`) — ตัวเลขแม่นเสมอแม้ตารางจะใหญ่ระดับหมื่นแถว
 
-**ปุ่ม "▶ Process All Pending":**
+**ปุ่ม "ประมวลผลทั้งหมดที่รออยู่":**
 
 - ใช้งานได้เมื่อ Ollama พร้อมและมีสาย pending
 - กดแล้วระบบจะ queue ทุก pending call ทำทีละ 1 เป็น background daemon thread
@@ -385,7 +385,7 @@ YYYYMMDDHHMMSS-CALLID.NNN-{AGENT|PHONE}-{PHONE|AGENT}-{Inbound|Outbound}.wav
   - "วิเคราะห์บทสนทนา..."
   - "บันทึกผล / จัดกลุ่มเคส"
 
-**ปุ่ม "🧹 ล้างเคสค้าง"** (แสดงเมื่อพบ orphan case)
+**ปุ่ม "ล้างเคสค้าง"** (แสดงเมื่อพบ orphan case)
 
 ใช้ลบเคสที่ไม่มีสายชี้มาแล้ว (เกิดจากการลบไฟล์เสียงก่อนหน้า)
 
@@ -410,18 +410,18 @@ dropdown แรกของ section นี้ — เลือกจำนวน
 
 | เครื่องมือ | ใช้ทำอะไร |
 |---|---|
-| 🔍 ช่องค้นหา | ค้นจากชื่อไฟล์ / เบอร์ / ผู้ upload |
+| ช่องค้นหา | ค้นจากชื่อไฟล์ / เบอร์ / ผู้ upload |
 | Radio สถานะ | ทั้งหมด / Pending / Processing / Done / Error |
-| Radio ทิศทาง | ทั้งหมด / 📥 Inbound / 📤 Outbound |
+| Radio ทิศทาง | ทั้งหมด / สายเข้า (Inbound) / สายออก (Outbound) |
 | Dropdown เรียง | ใหม่→เก่า / เก่า→ใหม่ / ตามสถานะ |
 
 filter ทุกอันทำงานพร้อมกันได้ — ตัวเลขด้านล่างจะแสดงว่ากรองเหลือกี่รายการจากทั้งหมด
 
 #### 7.3.3 Bulk Actions
 
-- **☑ Select All (ที่กรองอยู่):** เลือกทุกแถวที่อยู่ใน filter ปัจจุบัน
-- **☐ Deselect All:** ยกเลิกเลือกทั้งหมด
-- **🗑 Delete Selected (N):** ลบทั้งไฟล์ในดิสก์และ record ใน DB
+- **เลือกทั้งหมด (ที่กรองอยู่):** เลือกทุกแถวที่อยู่ใน filter ปัจจุบัน
+- **ยกเลิกการเลือกทั้งหมด:** ยกเลิกเลือกทั้งหมด
+- **ลบที่เลือกไว้ (N):** ลบทั้งไฟล์ในดิสก์และ record ใน DB
 
 ⚠️ การลบไม่สามารถกู้คืนได้
 
@@ -430,21 +430,21 @@ filter ทุกอันทำงานพร้อมกันได้ — �
 แต่ละแถวคือ expander มีหัวข้อรูปแบบ:
 
 ```
-🎵 [filename]  —  🟢 DONE  📞 0819979336  •  📅 2026-05-20  •  👤 Admin Name
+ไฟล์: [filename]  —  สถานะ: เสร็จแล้ว  •  เบอร์: 0819979336  •  วันที่: 2026-05-20  •  ผู้อัปโหลด: Admin Name
 ```
 
 กดขยายจะเห็น:
 
 - ✓ Checkbox เลือก
 - ข้อมูล: customer phone, uploader, dates, status, transcript size
-- ปุ่ม Process / Re-process / Delete
+- ปุ่ม ประมวลผล / ประมวลผลใหม่ / ลบไฟล์นี้
 - (ถ้า done) Tagged transcript, สรุป, Analysis JSON
 - (ถ้า done + มีเคส) ลิงก์ไปดูเคส
 - ปุ่ม "เชื่อมลูกค้าด้วยตนเอง" ถ้าระบบหาไม่เจอจาก phone
 
 #### 7.3.5 Pagination
 
-แสดงครั้งละ 20 แถว — กด "⬇ แสดงเพิ่ม" เพื่อขยายขอบเขต ภายใน load limit ที่เลือกไว้
+แสดงครั้งละ 20 แถว — กด "แสดงเพิ่ม" เพื่อขยายขอบเขต ภายใน load limit ที่เลือกไว้
 
 ---
 
@@ -464,16 +464,16 @@ Dashboard เน้น analytics — default 1,000 ล่าสุด ให้ 
 ### 8.2 KPI 4 ใบ
 
 - **Total Calls** ในช่วงที่กรอง
-- **Positive 😊** จำนวนสาย sentiment บวก
-- **Neutral 😐** กลาง
-- **Negative 😠** ลบ
+- **Positive ** จำนวนสาย sentiment บวก
+- **Neutral ** กลาง
+- **Negative ** ลบ
 
 ### 8.3 Sentiment Distribution
 
 แท่งกราฟ 3 แท่ง (positive / neutral / negative) สีตาม semantic mapping:
-- 🟢 เขียวมิ้นต์ = positive
+- เขียวมิ้นต์ = positive
 - ⚪ สเลทเทาฟ้า = neutral
-- 🔴 แดงนวล = negative
+- แดงนวล = negative
 
 ### 8.4 Topic / Intent Distribution
 
@@ -551,14 +551,14 @@ word cloud-style แท่งกราฟแสดง 15 keyword ยอดนิ
 #### 8.10.1 KPI 3 ใบ
 
 - **Avg Agent Score / 10** — ค่าเฉลี่ยรวมของทุกแถว
-- **Best 🏆** — แถวคะแนนสูงสุด (filename หรือชื่อเคส)
-- **Needs Improvement 📋** — แถวคะแนนต่ำสุด
+- **Best ** — แถวคะแนนสูงสุด (filename หรือชื่อเคส)
+- **Needs Improvement ** — แถวคะแนนต่ำสุด
 
 #### 8.10.2 Filter Row
 
 | Filter | ใช้ทำอะไร |
 |---|---|
-| 🔍 ค้นหา | เบอร์ / ชื่อไฟล์ / Subject เคส / Next Action |
+| ค้นหา | เบอร์ / ชื่อไฟล์ / Subject เคส / Next Action |
 | **Agent** (dropdown) | กรองตามรหัสพนักงาน เช่น 102, 104 — ดึงจาก filename |
 | กรองตามคะแนน | ทั้งหมด / < 6 (ต้องปรับปรุง) / 6-7.9 (พอใช้) / ≥ 8 (ดี) |
 | แถวต่อหน้า | 10 / 25 / 50 / 100 |
@@ -567,15 +567,15 @@ word cloud-style แท่งกราฟแสดง 15 keyword ยอดนิ
 
 | คอลัมน์ | คำอธิบาย |
 |---|---|
-| **สาย / เคส** | filename หรือ "📂 เคส #N — subject (N สาย)" |
+| **สาย / เคส** | filename หรือ "เคส #N — subject (N สาย)" |
 | **Agent** | รหัส Agent (เช่น 104) — ถ้าเคสมีหลาย Agent จะเป็น "102, 104" |
 | **Politeness** | คะแนน 0-5 (จาก LLM) |
 | **หลักฐาน Politeness** | quote จาก transcript ระบุ "ทำได้: ..." / "ไม่ได้: ..." |
 | **Problem Solving** | คะแนน 0-5 |
 | **หลักฐาน Problem Solving** | quote จาก transcript |
 | **Score** | Politeness + Problem Solving = 0-10 (progress bar) |
-| **Next Action 📌** | งานที่ต้องทำต่อ |
-| **ผู้รับผิดชอบ 👤** | Agent คนเดิม / ฝ่ายบัญชี / ฝ่าย QC / ฝ่ายจัดส่ง / หัวหน้าทีม |
+| **Next Action ** | งานที่ต้องทำต่อ |
+| **ผู้รับผิดชอบ ** | Agent คนเดิม / ฝ่ายบัญชี / ฝ่าย QC / ฝ่ายจัดส่ง / หัวหน้าทีม |
 
 **สำคัญ:**
 - ถ้าเคส `closed` → Next Action จะเป็น "— เคสปิดแล้ว"
@@ -587,9 +587,9 @@ word cloud-style แท่งกราฟแสดง 15 keyword ยอดนิ
 
 KPI 4 ใบ:
 - Total Cases
-- 🟢 เปิด (Open)
-- 🟡 ติดตาม (Follow-up)
-- 🔴 ปิด (Closed)
+- เปิด (Open)
+- ติดตาม (Follow-up)
+- ปิด (Closed)
 
 ใต้นั้นแสดงตาราง cases พร้อม search/filter:
 - Subject
@@ -607,7 +607,7 @@ KPI 4 ใบ:
 
 ## 9. หน้า Customers — ลูกค้าและทะเบียนรับประกัน
 
-### 9.1 Tab "👤 ลูกค้า"
+### 9.1 Tab "ลูกค้า"
 
 - ตารางลูกค้าทั้งหมด
 - ค้นหาด้วยชื่อ หรือเบอร์
@@ -671,7 +671,7 @@ KPI 4 ใบ:
 
 มี caption เตือน:
 
-> 💡 เปลี่ยน Whisper model → ระบบจะปรับ Backend / Device / Compute เป็นค่าแนะนำให้อัตโนมัติ (หลังจากนั้นปรับเองได้)
+> เปลี่ยน Whisper model → ระบบจะปรับ Backend / Device / Compute เป็นค่าแนะนำให้อัตโนมัติ (หลังจากนั้นปรับเองได้)
 
 **Auto-recommend combo per model:**
 
@@ -689,9 +689,9 @@ KPI 4 ใบ:
 1. เขียนค่าลง `.env` แบบ atomic
 2. แสดง success message + เตือนให้ restart
 3. รัน combo validation:
-   - 🔴 **Error:** combo ที่จะ crash แน่ ๆ (เช่น cuda แต่ไม่มี GPU)
-   - 🟡 **Warning:** combo ไม่ดีแต่ใช้ได้ (เช่น cpu + float16)
-   - 🔵 **Info:** combo ใช้ได้แต่ต้องรู้ side effect (เช่น faster-whisper + biodatlab → ต้องแปลง CT2)
+   - **Error:** combo ที่จะ crash แน่ ๆ (เช่น cuda แต่ไม่มี GPU)
+   - **Warning:** combo ไม่ดีแต่ใช้ได้ (เช่น cpu + float16)
+   - **Info:** combo ใช้ได้แต่ต้องรู้ side effect (เช่น faster-whisper + biodatlab → ต้องแปลง CT2)
 
 ⚠️ **ต้อง restart แอป** เพื่อให้ทุก module โหลด env ใหม่ — Streamlit ไม่ reload module โดยอัตโนมัติเมื่อ env เปลี่ยน
 
@@ -710,7 +710,7 @@ KPI 4 ใบ:
 ```
 08:00 — เปิดแอป → Home → ดู KPI งานค้างจากเมื่อวาน
 08:15 — Admin → Upload ไฟล์เสียงของวันก่อน (drag-drop ทั้ง folder)
-08:30 — กด "▶ Process All Pending" → ปล่อยรันใน background
+08:30 — กด "ประมวลผลทั้งหมดที่รออยู่" → ปล่อยรันใน background
        → ทำงานอื่นรอ (ระบบจะแจ้งเมื่อเสร็จ)
 14:00 — กลับมา Admin → Filter "Done" + วันนี้ → ดูสายที่เสร็จ
 14:30 — Dashboard → ดู Anomaly Calls วันนี้ → escalate ถ้ามี
@@ -743,7 +743,7 @@ Mon PM — Dashboard → Top 3 Issues + Issue Keywords
 - อัปเดต Ollama model ถ้ามี version ใหม่:
     ollama pull scb10x/llama3.1-typhoon2-8b-instruct
 - ดู Settings → Readiness Checks → แก้ rogue check
-- ลบไฟล์เก่าที่ไม่ใช้แล้ว (ทำผ่าน Admin → Filter + Delete Selected)
+- ลบไฟล์เก่าที่ไม่ใช้แล้ว (ทำผ่าน Admin → Filter + "ลบที่เลือกไว้")
 ```
 
 ---
@@ -841,7 +841,7 @@ Recency short-circuit ทำให้ระบบไม่เสียเวล�
 ```sql
 UPDATE calls SET status = 'uploaded' WHERE id IN (...)
 ```
-แล้วกด "Process All Pending"
+แล้วกด "ประมวลผลทั้งหมดที่รออยู่"
 
 ### 13.2 Backfill Scripts
 
@@ -873,8 +873,8 @@ Script จะใช้ LLM-only (ไม่รัน STT ซ้ำ) — เร็
 ### 13.3 การลบข้อมูล
 
 - **ลบทีละสาย:** Admin → expander → ปุ่ม Delete
-- **ลบหลายสาย:** Admin → Select All / กาเลือก → "🗑 Delete Selected (N)"
-- **ลบ orphan cases:** Admin → ปุ่ม "🧹 ล้างเคสค้าง" (แสดงเมื่อมี orphan)
+- **ลบหลายสาย:** Admin → "เลือกทั้งหมด" / กาเลือก → "ลบที่เลือกไว้ (N)"
+- **ลบ orphan cases:** Admin → ปุ่ม "ล้างเคสค้าง" (แสดงเมื่อมี orphan)
 
 ลบไม่กู้คืนได้ — backup `data/smartvoice.db` ก่อนทำการลบจำนวนมาก
 
@@ -955,15 +955,15 @@ Sealy, Therapedic, King Koil, Simmons, Serta, Stearns & Foster, Synda, Satin
 
 **สาเหตุ:** บัญชีที่ login อยู่เป็น role `Agent` หรือ `QA` ซึ่งไม่มีสิทธิ์เข้าสองหน้านี้ ระบบจึงซ่อนเมนูออกทั้งหมด (ดูตารางสิทธิ์ในหัวข้อ 5.3)
 
-**แก้:** ให้ Admin เข้าหน้า **👤 จัดการผู้ใช้** แล้วเปลี่ยน role ของบัญชีนั้นเป็น `Supervisor` หรือ `Admin` จากนั้นให้ผู้ใช้ logout แล้ว login ใหม่
+**แก้:** ให้ Admin เข้าหน้า **จัดการผู้ใช้** แล้วเปลี่ยน role ของบัญชีนั้นเป็น `Supervisor` หรือ `Admin` จากนั้นให้ผู้ใช้ logout แล้ว login ใหม่
 
 ### 15.1.1 ลืมรหัสผ่าน
 
 ผู้ดูแลระบบรีเซ็ตรหัสผ่านให้ไม่ได้ (ตามนโยบายว่ารหัสผ่านเป็นของเจ้าของบัญชีเท่านั้น) — ให้ทำแบบนี้แทน:
 
-1. Admin เข้าหน้า **👤 จัดการผู้ใช้** → เลือกบัญชีนั้น → **ปิดใช้งานบัญชี** เพื่อกันการเข้าถึงระหว่างรอ
+1. Admin เข้าหน้า **จัดการผู้ใช้** → เลือกบัญชีนั้น → **ปิดใช้งานบัญชี** เพื่อกันการเข้าถึงระหว่างรอ
 2. Admin สร้างบัญชีใหม่ให้พนักงานคนเดิม แล้วให้เจ้าตัวเปลี่ยนรหัสผ่านเองทันทีที่เข้าใช้งานครั้งแรก
-   (กล่องบัญชีใน sidebar → 🔐 เปลี่ยนรหัสผ่าน)
+   (กล่องบัญชีใน sidebar → เปลี่ยนรหัสผ่าน)
 
 ถ้าลืมรหัสของบัญชี Admin ทุกบัญชี ให้เพิ่มบัญชีสำรองผ่าน `SMARTVOICE_USERS` ใน `.env` (หัวข้อ 5.2) แล้ว restart แอป
 

@@ -16,7 +16,7 @@ Use this before sending SmartVoice to Omazz or running a live demo.
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-Expected current baseline: `209 passed` as of 2026-05-27 (warnings about `.pytest_cache` permissions are non-blocking if all tests pass; if you hit `PermissionError` on the pytest tmp dir, pass `--basetemp="$env:TEMP\pytest-clean"`).
+Expected current baseline: `302 passed` as of 2026-09-04 (warnings about `.pytest_cache` permissions are non-blocking if all tests pass; if you hit `PermissionError` on the pytest tmp dir, pass `--basetemp="$env:TEMP\pytest-clean"`).
 
 - Open Home and verify `Deployment readiness`.
 - Create demo users with hashed passwords:

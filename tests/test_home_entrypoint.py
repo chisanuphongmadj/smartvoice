@@ -20,9 +20,32 @@ def test_home_page_branding_describes_call_analytics():
     home = Path("Home.py").read_text(encoding="utf-8")
 
     assert 'page_title="Thai Call Analytics"' in home
-    assert 'st.title("🎙️ Thai Call Analytics")' in home
+    assert 'st.title("Thai Call Analytics")' in home
     assert "AI-powered Call Center Analytics for Thai Customer Calls" in home
-    assert 'st.title("🎙️ SmartVoice")' not in home
+    assert 'st.title("SmartVoice")' not in home
+
+
+def test_ui_labels_are_words_not_decorative_icons():
+    """Labels have to say what they mean — the emoji that used to stand in for
+    a word are gone from every page and shared helper."""
+    import re
+
+    emoji = re.compile(
+        "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]"
+    )
+    sources = [Path("Home.py"), Path("smartvoice/ui_helpers.py"), Path("smartvoice/audit.py")]
+    sources += sorted(Path("pages").glob("*.py"))
+
+    offenders = []
+    for path in sources:
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            # `pages/1_📤_Admin.py` and friends are file paths on disk, not labels.
+            if "pages/" in line:
+                continue
+            if emoji.search(line):
+                offenders.append(f"{path.name}:{number}: {line.strip()[:60]}")
+
+    assert not offenders, "decorative icons left in the UI:\n" + "\n".join(offenders)
 
 
 def test_router_uses_st_navigation_so_pages_dir_menu_is_disabled():

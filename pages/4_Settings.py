@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice - Settings", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="SmartVoice - Settings", layout="wide")
 
 from smartvoice.env_settings import (
     DEMO_PRESET,
@@ -24,7 +24,7 @@ from smartvoice.ui_helpers import audit, init_page
 # Admin/Supervisor only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_SETTINGS)
 
-st.title("⚙️ Settings")
+st.title("Settings")
 st.caption("ปรับโหมด demo และ AI ได้จากหน้านี้ โดยไม่ต้องเปิดไฟล์ `.env` เอง")
 
 values = read_env()
@@ -104,10 +104,10 @@ st.markdown("#### Speech model")
 # later in `model.to('cuda')`.
 _has_gpu = gpu_available()
 if _has_gpu:
-    st.success(f"🚀 ตรวจพบ GPU: **{gpu_device_name() or 'CUDA device'}** — เลือก device=cuda ได้")
+    st.success(f"ตรวจพบ GPU: **{gpu_device_name() or 'CUDA device'}** — เลือก device=cuda ได้")
 else:
     st.warning(
-        "⚠️ ไม่พบ GPU บนเครื่องนี้ — option `cuda` ถูกซ่อนจาก Device dropdown "
+        "ไม่พบ GPU บนเครื่องนี้ — option `cuda` ถูกซ่อนจาก Device dropdown "
         "เพื่อกัน pipeline crash ตอน process. แนะนำ device=cpu + compute=int8"
     )
 
@@ -157,7 +157,7 @@ def _apply_model_recommendations() -> None:
 
 
 st.caption(
-    "💡 เปลี่ยน Whisper model → ระบบจะปรับ Backend / Device / Compute เป็นค่าแนะนำให้อัตโนมัติ "
+    "หมายเหตุ: เปลี่ยน Whisper model → ระบบจะปรับ Backend / Device / Compute เป็นค่าแนะนำให้อัตโนมัติ "
     "(หลังจากนั้นปรับเองได้)"
 )
 whisper_model = st.selectbox(

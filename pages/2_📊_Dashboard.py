@@ -6,7 +6,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Dashboard", page_icon="📊", layout="wide")
+st.set_page_config(page_title="SmartVoice — Dashboard", layout="wide")
 
 from smartvoice import db
 from smartvoice.file_manager import extract_agent_code_from_filename
@@ -55,7 +55,7 @@ st.markdown(
 # ─────────────────────────────────────────
 # PAGE: DASHBOARD — Analytics
 # ─────────────────────────────────────────
-st.title("📊 Dashboard — Analytics")
+st.title("Dashboard — Analytics")
 
 # ── Scale-friendly loading: cap rows by user-selected limit ─────────────
 # ทางบริษัทมีไฟล์เสียงหลักหมื่น — โหลดทั้งตารางทุกครั้งจะหน่วงระบบ
@@ -94,7 +94,7 @@ df["created_at"] = pd.to_datetime(df["created_at"])
 loaded_count = len(df)
 
 # ── Filters (เปิดโดย default เพื่อให้ผู้ใช้เห็นวิธีลดข้อมูลได้ทันที) ────────────
-with st.expander("🔍 Filters", expanded=True):
+with st.expander("Filters", expanded=True):
     f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1, 1.2])
     with f_col1:
         min_date = df["created_at"].dt.date.min()
@@ -122,12 +122,12 @@ with st.expander("🔍 Filters", expanded=True):
 # Info banner — ให้ผู้ใช้รู้ scope ที่กำลังดูอยู่
 if _current_limit is not None and loaded_count < total_in_db:
     st.info(
-        f"📊 กำลังวิเคราะห์ **{loaded_count:,}** สายล่าสุด จากทั้งหมด "
+        f"กำลังวิเคราะห์ **{loaded_count:,}** สายล่าสุด จากทั้งหมด "
         f"**{total_in_db:,}** สายในระบบ — ปรับ *'จำนวนสายที่โหลด'* "
         f"ใน Filter เพื่อโหลดเพิ่มหรือลดลง"
     )
 else:
-    st.success(f"✅ กำลังวิเคราะห์ทั้งหมด **{loaded_count:,}** สายในระบบ")
+    st.success(f"กำลังวิเคราะห์ทั้งหมด **{loaded_count:,}** สายในระบบ")
 
 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
     start_date, end_date = date_range
@@ -155,9 +155,9 @@ neu = (df["sentiment"] == "neutral").sum()
 col1, col2, col3, col4 = st.columns(4)
 for col, val, label in [
     (col1, total, "Total Calls"),
-    (col2, pos, "Positive 😊"),
-    (col3, neu, "Neutral 😐"),
-    (col4, neg, "Negative 😠"),
+    (col2, pos, "Positive"),
+    (col3, neu, "Neutral"),
+    (col4, neg, "Negative"),
 ]:
     with col:
         st.markdown(metric_card(val, label), unsafe_allow_html=True)
@@ -275,7 +275,7 @@ with kw_col:
     kw_left, kw_right = st.columns(2)
 
     with kw_left:
-        st.subheader("🏷 หัวข้อปัญหา (Issue Keywords)")
+        st.subheader("หัวข้อปัญหา (Issue Keywords)")
         all_keywords = []
         for call in done_calls:
             raw = call.get("keywords") or ""
@@ -313,7 +313,7 @@ with kw_col:
             st.caption("ยังไม่มีข้อมูล keyword")
 
     with kw_right:
-        st.subheader("🔖 Brand Mentions")
+        st.subheader("Brand Mentions")
         all_brands = []
         for call in done_calls:
             raw = call.get("brand_mentions") or ""
@@ -353,7 +353,7 @@ with kw_col:
 st.divider()
 
 # ── Platform Mentions ────────────────────────────────────────────────────
-st.subheader("🛒 Platform / Channel Mentions")
+st.subheader("Platform / Channel Mentions")
 all_platforms = []
 for call in done_calls:
     raw = call.get("platform_mentions") or ""
@@ -391,22 +391,22 @@ else:
     st.caption("ยังไม่มีข้อมูล platform mentions — re-process ไฟล์เสียงเพื่อดูผล")
 
 with anom_col:
-    st.subheader("⚠️ Anomaly Detection")
+    st.subheader("Anomaly Detection")
     anom_calls = [c for c in done_calls if c.get("anomaly_detected")]
     normal_count = total - len(anom_calls)
 
     a1, a2 = st.columns(2)
     with a1:
-        st.markdown(metric_card(len(anom_calls), "Anomaly Calls ⚠️", "#ef4444"), unsafe_allow_html=True)
+        st.markdown(metric_card(len(anom_calls), "Anomaly Calls", "#ef4444"), unsafe_allow_html=True)
     with a2:
-        st.markdown(metric_card(normal_count, "Normal Calls ✅", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(metric_card(normal_count, "Normal Calls", "#22c55e"), unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     if anom_calls:
         for c in anom_calls:
             reason = c.get("anomaly_reason") or "ไม่ระบุสาเหตุ"
             severity = c.get("anomaly_severity") or ""
-            sev_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(severity, "⚠️")
+            sev_badge = {"high": "รุนแรง", "medium": "ปานกลาง", "low": "เล็กน้อย"}.get(severity, "ไม่ระบุ")
             st.warning(f"{sev_badge} **{c['filename']}**  \n{reason}")
     else:
         st.success("ไม่พบความผิดปกติในการสนทนา")
@@ -414,7 +414,7 @@ with anom_col:
 st.divider()
 
 # ── Top Issues ───────────────────────────────────────────────────────────
-st.subheader("🔥 Top 3 Issues")
+st.subheader("Top 3 Issues")
 issue_calls = [c for c in done_calls if c.get("sentiment") == "negative" or c.get("anomaly_detected")]
 if issue_calls:
     issue_topic_counts = Counter(
@@ -451,9 +451,9 @@ else:
 st.divider()
 
 # ── Agent Performance ────────────────────────────────────────────────────
-st.subheader("👤 Agent Performance")
+st.subheader("Agent Performance")
 st.caption(
-    "🔗 สายในเคสเดียวกันถูกรวมเป็นแถวเดียว "
+    "สายในเคสเดียวกันถูกรวมเป็นแถวเดียว "
     "(คะแนน = ค่าเฉลี่ย, Next Action = จากสายล่าสุด) "
     "— เคสที่ปิดแล้วจะไม่แสดง Next Action"
 )
@@ -521,7 +521,7 @@ def _get_case(case_id: int) -> dict:
     return _case_cache[case_id]
 
 def _phone_prefix(phone: str) -> str:
-    return f"\U0001F4DE {phone} · " if phone else ""  # \U0001F4DE = 📞
+    return f"เบอร์ {phone} · " if phone else ""
 
 CLOSED_ACTION = "— เคสปิดแล้ว (ไม่มีเรื่องค้าง)"
 CLOSED_OWNER = "—"
@@ -540,7 +540,7 @@ for case_id, entries in case_groups.items():
         # Single-call case — filename + phone prefix
         label = f"{_phone_prefix(phone)}{latest['filename']}"
     else:
-        label = f"{_phone_prefix(phone)}📂 เคส #{case_id} — {case['subject']} ({n} สาย)"
+        label = f"{_phone_prefix(phone)}เคส #{case_id} — {case['subject']} ({n} สาย)"
     evidence_prefix = f"เฉลี่ยจาก {n} สาย; ล่าสุด: " if n > 1 else ""
     case_agent_codes = sorted({e["agent_code"] for e in entries if e["agent_code"]})
     agent_rows.append({
@@ -586,14 +586,14 @@ if agent_rows:
         best = ap_df_full.loc[ap_df_full["Score"].idxmax(), "Label"]
         st.markdown(
             f'<div class="metric-card"><div class="metric-value" style="font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="{best}">{best}</div>'
-            f'<div class="metric-label">Best 🏆</div></div>',
+            f'<div class="metric-label">Best</div></div>',
             unsafe_allow_html=True,
         )
     with ag3:
         worst = ap_df_full.loc[ap_df_full["Score"].idxmin(), "Label"]
         st.markdown(
             f'<div class="metric-card"><div class="metric-value" style="font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" title="{worst}">{worst}</div>'
-            f'<div class="metric-label">Needs Improvement 📋</div></div>',
+            f'<div class="metric-label">Needs Improvement</div></div>',
             unsafe_allow_html=True,
         )
 
@@ -611,7 +611,7 @@ if agent_rows:
     ap_search_col, ap_agent_col, ap_score_col, ap_size_col = st.columns([2, 1.2, 1.4, 1])
     with ap_search_col:
         ap_search = st.text_input(
-            "🔍 ค้นหา (เบอร์ / ชื่อไฟล์ / Subject / Next Action)",
+            "ค้นหา (เบอร์ / ชื่อไฟล์ / Subject / Next Action)",
             key="agent_perf_search",
             placeholder="เช่น 081-999-9336, แจ้งปัญหา, ติดตาม",
         )
@@ -701,8 +701,8 @@ if agent_rows:
                 "Score": st.column_config.ProgressColumn("Score", min_value=0, max_value=10, format="%.1f / 10"),
                 "Politeness Evidence": st.column_config.TextColumn("หลักฐาน Politeness", width="large"),
                 "Problem Solving Evidence": st.column_config.TextColumn("หลักฐาน Problem Solving", width="large"),
-                "Next Action": st.column_config.TextColumn("Next Action 📌", width="large"),
-                "Owner": st.column_config.TextColumn("ผู้รับผิดชอบ 👤", width="medium"),
+                "Next Action": st.column_config.TextColumn("Next Action", width="large"),
+                "Owner": st.column_config.TextColumn("ผู้รับผิดชอบ", width="medium"),
             },
         )
 else:
@@ -711,7 +711,7 @@ else:
 st.divider()
 
 # ── Case Stats ───────────────────────────────────────────────────────────
-st.subheader("📂 Case Management")
+st.subheader("Case Management")
 
 case_counts = db.get_case_counts()
 
@@ -719,11 +719,11 @@ cs_col1, cs_col2, cs_col3, cs_col4 = st.columns(4)
 with cs_col1:
     st.markdown(metric_card(case_counts["total"], "Total Cases"), unsafe_allow_html=True)
 with cs_col2:
-    st.markdown(metric_card(case_counts["open"], "🟢 เปิด (Open)", "#22c55e"), unsafe_allow_html=True)
+    st.markdown(metric_card(case_counts["open"], "เปิด (Open)", "#22c55e"), unsafe_allow_html=True)
 with cs_col3:
-    st.markdown(metric_card(case_counts["follow_up"], "🟡 ติดตาม (Follow-up)", "#eab308"), unsafe_allow_html=True)
+    st.markdown(metric_card(case_counts["follow_up"], "ติดตาม (Follow-up)", "#eab308"), unsafe_allow_html=True)
 with cs_col4:
-    st.markdown(metric_card(case_counts["closed"], "🔴 ปิด (Closed)", "#ef4444"), unsafe_allow_html=True)
+    st.markdown(metric_card(case_counts["closed"], "ปิด (Closed)", "#ef4444"), unsafe_allow_html=True)
 
 if case_counts["total"] > 0:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -731,9 +731,9 @@ if case_counts["total"] > 0:
     # ── Filter row — push status/search down to SQL ─────────────────────
     _STATUS_OPTIONS = {
         "ทั้งหมด": None,
-        "🟢 เปิด (Open)": "open",
-        "🟡 ติดตาม (Follow-up)": "follow_up",
-        "🔴 ปิด (Closed)": "closed",
+        "เปิด (Open)": "open",
+        "ติดตาม (Follow-up)": "follow_up",
+        "ปิด (Closed)": "closed",
     }
     cf_status_col, cf_search_col, cf_size_col = st.columns([1.2, 2.2, 1])
     with cf_status_col:
@@ -744,7 +744,7 @@ if case_counts["total"] > 0:
         )
     with cf_search_col:
         cs_search = st.text_input(
-            "🔍 ค้นหา (Subject / ชื่อลูกค้า / เบอร์)",
+            "ค้นหา (Subject / ชื่อลูกค้า / เบอร์)",
             key="case_search",
             placeholder="เช่น แจ้งปัญหา, สุภาพร, 0819999336",
         )
@@ -800,7 +800,7 @@ if case_counts["total"] > 0:
 
     if all_cases:
         case_rows = []
-        _case_badge = {"open": "🟢 เปิด", "follow_up": "🟡 ติดตาม", "closed": "🔴 ปิด"}
+        _case_badge = {"open": "เปิด", "follow_up": "ติดตาม", "closed": "ปิด"}
         for cs in all_cases:
             customer_name = (
                 f"{cs.get('first_name', '')} {cs.get('last_name', '')}".strip() or "—"
@@ -832,7 +832,7 @@ st.divider()
 # ── Call summaries table ─────────────────────────────────────────────────
 st.subheader("Call Summaries")
 
-search_term = st.text_input("🔍 Filter by filename or topic", "")
+search_term = st.text_input("Filter by filename or topic", "")
 filtered_df = df.copy()
 if search_term:
     mask = (
@@ -854,7 +854,7 @@ def _fmt_keywords(raw):
 display_df = filtered_df[["filename", "sentiment", "topic", "keywords", "anomaly_detected", "summary", "created_at"]].copy()
 display_df["sentiment"] = display_df["sentiment"].map(lambda s: sentiment_emoji(s))
 display_df["keywords"] = display_df["keywords"].map(_fmt_keywords)
-display_df["anomaly_detected"] = display_df["anomaly_detected"].map(lambda v: "⚠️ Yes" if v else "✅ No")
+display_df["anomaly_detected"] = display_df["anomaly_detected"].map(lambda v: "พบ" if v else "ปกติ")
 display_df["created_at"] = pd.to_datetime(display_df["created_at"]).dt.strftime("%Y-%m-%d %H:%M:%S")
 display_df.columns = ["Filename", "Sentiment", "Topic", "Keywords", "Anomaly", "Summary", "Created (UTC)"]
 

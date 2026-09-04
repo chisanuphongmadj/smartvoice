@@ -196,11 +196,16 @@ smartvoice/
 │   ├── 1_📤_Admin.py
 │   ├── 2_📊_Dashboard.py
 │   ├── 3_👥_Customers.py
-│   └── 4_Settings.py
+│   ├── 4_Settings.py
+│   ├── 5_👤_Users.py
+│   ├── 6_➕_Data_Entry.py
+│   └── 7_📜_Audit_Log.py
 ├── smartvoice/
+│   ├── audit.py
 │   ├── auth.py
 │   ├── cli.py
 │   ├── config.py
+│   ├── customer_entry.py
 │   ├── db.py
 │   ├── env_settings.py
 │   ├── file_manager.py
