@@ -7,7 +7,8 @@
 | รายการ | รายละเอียด |
 |---|---|
 | DBMS | SQLite 3 |
-| จำนวนตาราง | 5 |
+| จำนวนตาราง | 7 (ข้อมูลธุรกิจ 5 + `users` + `audit_log`) |
+| การลบข้อมูล | `customers` / `warranty_registrations` เป็น soft delete (`deleted_at`) · `users` ใช้ปิดใช้งาน (`is_active`) · `audit_log` เขียนเพิ่มอย่างเดียว |
 | Encoding | UTF-8 |
 | Timezone | UTC เก็บเป็น ISO 8601 text |
 
@@ -32,6 +33,8 @@ erDiagram
         TEXT country
         TEXT postcode
         TEXT created_at
+        TEXT deleted_at
+        TEXT deleted_by
     }
 
     warranty_registrations {
@@ -55,6 +58,9 @@ erDiagram
         TEXT expiry_date
         TEXT remark
         TEXT created_at
+        TEXT deleted_at
+        TEXT deleted_by
+        INTEGER hidden_with_customer
     }
 
     calls {
@@ -102,6 +108,30 @@ erDiagram
         INTEGER customer_id FK
         INTEGER warranty_id FK
         TEXT matched_by
+        TEXT created_at
+    }
+
+    users {
+        INTEGER id PK
+        TEXT username UK
+        TEXT display_name
+        TEXT role
+        TEXT password_hash
+        INTEGER is_active
+        TEXT created_at
+        TEXT updated_at
+        TEXT last_login_at
+    }
+
+    audit_log {
+        INTEGER id PK
+        TEXT actor
+        TEXT actor_role
+        TEXT action
+        TEXT entity
+        INTEGER entity_id
+        TEXT entity_label
+        TEXT changes
         TEXT created_at
     }
 
@@ -184,15 +214,17 @@ erDiagram
 | Column | Meaning |
 |---|---|
 | `id` | PK |
-| `actor`, `actor_role` | ใครทำ (username + role ตอนนั้น) |
-| `action` | `create` / `update` / `delete` (= ซ่อน) / `restore` |
-| `entity` | `customer` / `warranty` |
-| `entity_id` | id ของแถวที่ถูกกระทำ |
-| `entity_label` | ชื่อ/เลขทะเบียนตอนนั้น เก็บไว้อ่านย้อนหลังได้แม้ข้อมูลจะเปลี่ยนภายหลัง |
-| `changes` | JSON — `{field: [ก่อน, หลัง]}` สำหรับ update, snapshot สำหรับ create/delete |
-| `created_at` | เวลาที่บันทึก |
+| `actor` | ใครทำ — ชื่อที่แสดงของบัญชี; ถ้าเป็น `login_failed` คือข้อความที่พิมพ์ในช่อง username (ยังไม่รู้ว่าเป็นใคร) |
+| `actor_role` | role ณ ตอนนั้น (ว่างสำหรับ `login_failed`) |
+| `action` | `create` / `update` / `delete` (ลูกค้า/ทะเบียน = ซ่อน) / `restore` / `login` / `login_failed` / `logout` |
+| `entity` | `customer` / `warranty` / `user` / `call` / `case` / `session` / `settings` |
+| `entity_id` | id ของแถวที่ถูกกระทำ (ว่างได้ เช่น settings) |
+| `entity_label` | ชื่อ ณ ตอนนั้น — ชื่อลูกค้า, เลขทะเบียน, ชื่อไฟล์, หัวข้อเคส, หรือ username สำหรับ `user` / `session` |
+| `changes` | JSON — `{field: [ก่อน, หลัง]}` สำหรับ update, snapshot สำหรับ create/delete; ค่า `password` / `password_hash` / `hf_token` ถูกแทนด้วย `***` |
+| `created_at` | เวลาที่บันทึก (UTC) |
 
 > ตารางนี้เป็น **append-only** ไม่มีโค้ดส่วนใดใน repo ที่ UPDATE หรือ DELETE แถวใน `audit_log`
+> การเขียนผ่าน `audit.record()` ซึ่งไม่ raise — ถ้าเขียน log ไม่สำเร็จ action ของผู้ใช้ยังสำเร็จตามปกติ
 
 ### `call_customer_links`
 
@@ -215,6 +247,23 @@ erDiagram
 | `status` | `open` / `follow_up` / `closed` |
 | `created_at`, `updated_at` | เวลา lifecycle ของเคส |
 
+### `users`
+
+| Column | Type | Meaning |
+|---|---|---|
+| `id` | INTEGER | PK |
+| `username` | TEXT | ชื่อที่ใช้ล็อกอิน — UNIQUE แบบไม่สนตัวพิมพ์เล็ก/ใหญ่ (`COLLATE NOCASE`) ใช้ได้เฉพาะ `a-z 0-9 . _ -` อย่างน้อย 3 ตัว |
+| `display_name` | TEXT | ชื่อที่แสดงในแอปและในคอลัมน์ `actor` ของ `audit_log` |
+| `role` | TEXT | `Admin` / `Supervisor` / `QA` / `Agent` — ค่าที่ไม่รู้จักถูกตีความเป็น `Agent` |
+| `password_hash` | TEXT | `pbkdf2_sha256$260000$salt$hash` — ไม่มีการเก็บ plaintext |
+| `is_active` | INTEGER | 1 = ใช้งาน, 0 = ปิดใช้งาน (ล็อกอินไม่ได้) — **แทนการลบบัญชี** |
+| `created_at`, `updated_at` | TEXT | เวลาสร้าง / แก้ไขล่าสุด |
+| `last_login_at` | TEXT | เข้าสู่ระบบสำเร็จครั้งล่าสุด |
+
+> ไม่มีหน้าไหนในแอปลบแถวในตารางนี้ เพราะ `audit_log` อ้างถึงบัญชีเหล่านี้อยู่ — เลิกใช้บัญชีด้วย `is_active = 0`
+> ต้องมี `role = 'Admin'` และ `is_active = 1` อย่างน้อย 1 แถวเสมอ (บังคับที่ `auth.would_remove_last_admin()`)
+> บัญชีสำรองจาก `SMARTVOICE_USERS` ใน `.env` ไม่อยู่ในตารางนี้ ระบบตรวจตารางนี้ก่อนแล้วค่อยตกไปที่ `.env`
+
 ---
 
 ## 4. Relationship Summary
@@ -227,6 +276,8 @@ erDiagram
 | cases → calls | 1 : N |
 | calls → call_customer_links | 1 : N |
 | warranty_registrations → call_customer_links | 1 : N |
+
+`users` และ `audit_log` **ไม่มี foreign key** ไปตารางอื่นโดยตั้งใจ — `audit_log` เก็บ `entity` + `entity_id` + `entity_label` (ชื่อ ณ เวลานั้น) และ `actor` เป็นข้อความ เพื่อให้ประวัติยังอ่านได้ครบแม้ข้อมูลต้นทางจะถูกแก้ชื่อหรือถูกซ่อนภายหลัง
 
 ---
 
@@ -246,8 +297,8 @@ erDiagram
 - `topic_detail`
 
 `_migrate_soft_delete()` ทำแบบเดียวกันกับ `customers` (`deleted_at`, `deleted_by`) และ
-`warranty_registrations` (`deleted_at`, `deleted_by`, `hidden_with_customer`) ส่วน `audit_log`
-สร้างด้วย `CREATE TABLE IF NOT EXISTS`
+`warranty_registrations` (`deleted_at`, `deleted_by`, `hidden_with_customer`) ส่วน `users` และ `audit_log`
+สร้างด้วย `CREATE TABLE IF NOT EXISTS` (บัญชี `admin` เริ่มต้นถูกสร้างตอนเปิดแอป ถ้ายังไม่มีบัญชีใดเลย)
 
 ดังนั้นการเปิด DB เก่าด้วยแอปเวอร์ชันใหม่จะค่อย ๆ เติม column ที่ขาดให้เอง โดยข้อมูลเดิมยังอยู่ครบ
 (`deleted_at` เป็น NULL = ทุกแถวเดิมถือว่ายังใช้งานอยู่)

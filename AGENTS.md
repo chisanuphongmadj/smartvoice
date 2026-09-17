@@ -41,7 +41,9 @@ run.bat                 # Windows
 ./run.sh                # Linux/macOS
 ```
 
-**Test baseline ล่าสุด:** 209 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
+**Test baseline ล่าสุด:** 305 tests, ต้องผ่าน 100% ก่อน commit ทุกครั้ง
+
+**เข้าใช้งานครั้งแรก:** ถ้ายังไม่มีบัญชีใดในระบบ แอปสร้าง `admin` / `admin1234` ให้อัตโนมัติ (มีคำเตือนค้างจนกว่าจะเปลี่ยนรหัสผ่าน)
 
 ---
 
@@ -49,17 +51,27 @@ run.bat                 # Windows
 
 ```
 smartvoice/
-├── Home.py                     # Streamlit home page
-├── pages/                      # Streamlit multi-page (Admin / Dashboard / Customers / Settings)
+├── Home.py                     # Router: login → st.navigation ตามสิทธิ์ของ role + หน้าแรก
+├── pages/
+│   ├── 1_📤_Admin.py           # Upload / process / เคส (Admin, Supervisor)
+│   ├── 2_📊_Dashboard.py       # Analytics (ทุก role)
+│   ├── 3_👥_Customers.py       # ดูลูกค้า + ทะเบียนรับประกัน (ทุก role)
+│   ├── 4_Settings.py           # ตั้งค่า .env (Admin, Supervisor)
+│   ├── 5_👤_Users.py           # บัญชีพนักงาน — เพิ่ม / เปลี่ยน role / เปิด-ปิด (Admin)
+│   ├── 6_➕_Data_Entry.py      # เพิ่ม / แก้ / ซ่อน / กู้คืน ลูกค้าและทะเบียน (Admin)
+│   └── 7_📜_Audit_Log.py       # ประวัติการใช้งาน (Admin, Supervisor)
 ├── smartvoice/                 # Business logic package
 │   ├── config.py               # ⚠️ environment vars ทั้งหมดอยู่ที่นี่
-│   ├── db.py                   # SQLite schema + CRUD (26 KB)
+│   ├── db.py                   # SQLite schema + migrations + CRUD
 │   ├── pipeline.py             # 🔥 Core orchestrator (70 KB) — speaker correction, splitters, merge
 │   ├── prompts.py              # 🔥 LLM prompts (54 KB) — system+user สำหรับทุก LLM call
 │   ├── ollama_client.py        # LLM client + JSON extraction
 │   ├── file_manager.py         # Upload + SHA-256 dedup
-│   ├── ui_helpers.py           # CSS, badges, processing launcher
-│   ├── auth.py                 # Streamlit login
+│   ├── ui_helpers.py           # CSS, login page, init_page() role guard, audit() wrapper, processing launcher
+│   ├── auth.py                 # PBKDF2 hashing, บัญชี DB/.env, ROLE_PERMISSIONS
+│   ├── audit.py                # คำศัพท์ audit trail + record() + redact() + diff_fields()
+│   ├── customer_entry.py       # กติกา validate / บันทึก / ซ่อน / กู้คืน ของหน้าเพิ่มข้อมูล
+│   ├── env_settings.py         # อ่าน/เขียน .env + GPU detect + combo validation
 │   ├── preflight.py            # Deployment readiness checks
 │   ├── logger.py               # Rotating file logger
 │   └── stt/                    # Speech-to-Text sub-package
@@ -72,7 +84,9 @@ smartvoice/
 └── docs/                       # Architecture, DB design, user manual
 ```
 
-**DB tables:** `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`
+**DB tables:** `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`, `audit_log`
+
+⚠️ ชื่อไฟล์ใน `pages/` มี emoji อยู่จริง และ `Home.py` route ไปที่ path ตรงตัวนั้น — ห้ามลบ emoji ออกจาก path (แต่ห้ามใส่ emoji ในป้ายที่ผู้ใช้เห็น ดูข้อ 7.8)
 
 ---
 
@@ -198,10 +212,11 @@ smartvoice/
 
 ---
 
-## 6.4 Scale-friendly Admin / Dashboard
+## 6.4 Scale-friendly Home / Admin / Dashboard
 
-ทั้งสองหน้าจำกัดจำนวน row ที่โหลดเข้ามา render เพื่อให้ไม่ค้างเมื่อมี 10K+ ไฟล์:
+ทั้งสามหน้าไม่โหลด row ที่ไม่ได้แสดง เพื่อให้ไม่ค้างเมื่อมี 10K+ ไฟล์:
 
+- **Home** (`Home.py`): การ์ด 4 ใบใช้ `db.count_calls_by_status()` — ห้ามกลับไปใช้ `get_all_calls()` (เป็น `SELECT *` ลาก transcript ทุกสายเข้าหน่วยความจำ วัดได้ ~278 ms / ~57 MB ที่ 5,000 สาย). readiness checks ครอบด้วย `@st.cache_data(ttl=300)` เพราะเนื้อใน expander รันทุก rerun แม้พับอยู่ และมันยิง network ~2.6 วินาที — รวมแล้วหน้าแรกจาก 2.9 วินาที เหลือ 0.2 วินาที
 - **Admin** (`pages/1_📤_Admin.py`): metric cards ใช้ `db.count_calls_by_status()` (SQL `GROUP BY`) ให้แม่นแม้โหลดแค่ N สายล่าสุด. Load-limit picker default `200 ล่าสุด` ถ้า total > 200. "Process All Pending" lazy query ผ่าน `db.get_pending_call_ids()`. Auto-refresh fragment ใช้ `db.get_processing_calls()` (0-1 row โดยปกติ).
 - **Dashboard** (`pages/2_📊_Dashboard.py`): load-limit default `1,000 ล่าสุด` ถ้า total > 1000 — analytics ต้อง signal มาก กว่าหน้า Admin
 
@@ -237,6 +252,50 @@ Helpers ใน `env_settings.py`:
 - `recommended_combo_for_model(model, has_gpu=None)` → tuple(backend, device, compute) | None
 - `_MODEL_RECOMMENDED_COMBO` — table mapping model → preferred combo (เพิ่ม model ใหม่ใน dropdown ต้องเพิ่มใน table นี้ด้วย)
 
+## 6.8 Login, สิทธิ์ และนโยบายบัญชี
+
+`Home.py` เป็น **router** ไม่ใช่แค่หน้าแรก: ยังไม่ login → เห็นแค่หน้าเข้าสู่ระบบ; login แล้ว → `st.navigation()` สร้างเมนูจาก `auth.visible_pages(role)` เท่านั้น หน้าที่ไม่มีสิทธิ์จึงไม่ขึ้นเมนูเลย และพิมพ์ URL ตรง ๆ ก็เข้าไม่ได้
+
+| Role | home | admin | dashboard | customers | data_entry | audit | settings | users |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| Admin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Supervisor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
+| QA | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Agent | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+กติกาที่ต้องรักษา:
+- ทุกหน้าเริ่มด้วย `user, role = init_page(PAGE_<KEY>)` — ห้ามเช็ค `if role in {...}` เอง
+- **เพิ่มหน้าใหม่ต้องครบ 5 จุด:** `PAGE_*` constant + `PAGE_ORDER`/`PAGE_LABELS_TH` + `ROLE_PERMISSIONS` + route ใน `_PAGE_SPECS` ของ `Home.py` + `init_page()` ในไฟล์หน้า (`tests/test_home_entrypoint.py` จับได้ถ้าขาด)
+- `normalize_role()` แปลงค่าที่ไม่รู้จักเป็น `Agent` (สิทธิ์ต่ำสุด)
+- ต้องเหลือ Admin ที่เปิดใช้งาน ≥ 1 บัญชีเสมอ (`auth.would_remove_last_admin()`)
+- **ไม่มีการรีเซ็ตรหัสผ่านโดย Admin — ตามนโยบาย** รหัสผ่านเป็นของเจ้าของบัญชี ตั้งได้ผ่าน `auth.change_password()` ซึ่งบังคับกรอกรหัสเดิมเท่านั้น สิ่งที่ Admin ทำได้คือเปิด/ปิดบัญชี ห้ามเพิ่ม reset helper หรือฟอร์มรีเซ็ต (`tests/test_auth.py` จับได้)
+- **หน้าจัดการผู้ใช้ไม่มีปุ่มลบบัญชี** เพราะ `audit_log` อ้างถึงบัญชีเหล่านั้น — ใช้ปิดใช้งานแทน (`db.delete_user()` ยังอยู่แต่ไม่มีหน้าไหนเรียก)
+- session อยู่ใน Streamlit session_state — กด F5 = ออกจากระบบ (ยอมรับได้ ไม่มี cookie/JWT)
+
+## 6.9 Soft delete + audit trail
+
+**ลูกค้าและทะเบียนรับประกันไม่ถูกลบออกจากฐานข้อมูล** — "ลบ" ใน UI คือประทับ `deleted_at` / `deleted_by` แล้วแถวจะหายจาก query ปกติ ห้ามเขียน `DELETE FROM customers` / `DELETE FROM warranty_registrations`
+
+- `soft_delete_customer()` ซ่อนลูกค้า **และ** ทะเบียนของเขา (ติดธง `hidden_with_customer = 1`) โดยไม่แตะสาย เคส และการเชื่อมสาย
+- `restore_customer()` กู้คืนเฉพาะทะเบียนที่มีธงนั้น — ห้ามใช้ `deleted_at` ที่ตรงกันเป็นตัวจับคู่ เพราะซ่อนสองครั้งในวินาทีเดียวกันจะชนกัน
+- ฟังก์ชันอ่านทุกตัวมี `include_deleted=False` เป็นค่าเริ่มต้น; `phone` / `registration_no` เป็น UNIQUE แถวที่ซ่อนจึงยังจองค่าไว้ — ตัวตรวจซ้ำใน `customer_entry` ต้องมองด้วย `include_deleted=True` แล้วบอกให้กู้คืนแทน
+
+**Audit trail** — ทุก action ที่เปลี่ยนข้อมูลต้องผ่าน `audit.record()` (หน้าเว็บเรียก `ui_helpers.audit()` ซึ่งเติมผู้ใช้จาก session ให้) ลงตาราง `audit_log` ดูได้ที่หน้า `7_📜_Audit_Log.py`
+
+| จาก | บันทึกอะไร |
+|---|---|
+| `ui_helpers` (login flow) | เข้าสู่ระบบ, เข้าสู่ระบบไม่สำเร็จ, ออกจากระบบ, เปลี่ยนรหัสผ่านตัวเอง |
+| `customer_entry` | ลูกค้า/ทะเบียน: เพิ่ม, แก้ไข, ซ่อน, กู้คืน |
+| `5_👤_Users.py` | สร้างบัญชี, เปลี่ยน role, เปิด/ปิดใช้งาน |
+| `1_📤_Admin.py` | อัปโหลด/ลบสาย, เชื่อมลูกค้าแบบ manual, เปลี่ยนสถานะ/หัวข้อ/รวมเคส |
+| `4_Settings.py` | บันทึก `.env` และปุ่ม preset |
+
+- `audit_log` เป็น **append-only** — ห้ามมีโค้ด UPDATE/DELETE แถวในตารางนี้
+- `audit.record()` **ห้าม raise** — log ล้มต้องไม่ทำให้งานของผู้ใช้หาย
+- `audit.redact()` ตัดค่า `password` / `password_hash` / `hf_token` ออก (เก็บชื่อฟิลด์ไว้)
+- entry แบบ `update` เก็บ `{field: [ก่อน, หลัง]}` จาก `audit.diff_fields()` และถ้าไม่มีอะไรเปลี่ยนจะไม่เขียน entry
+- เพิ่ม action ใหม่ที่เปลี่ยนข้อมูล → ต้องมี `audit()` ข้าง ๆ (`tests/test_audit.py` ตรวจ)
+
 ---
 
 ## 7. Pitfalls / สิ่งที่เคยพังมาแล้ว
@@ -260,6 +319,18 @@ markers ใช้กับ `_enforce_role_rules` ที่ scoring ตำแห�
 ### 7.6 `created_at` ใน DB
 คือเวลา **upload/process** ไม่ใช่ **วันที่โทรจริง** — วันที่โทรอยู่ใน filename pattern `YYYYMMDDHHMMSS-...`
 
+### 7.7 ตัดข้อความภาษาไทยด้วยจำนวนตัวอักษร
+`summary[:100]` เคยทำให้ข้อความขาดกลางคำ ("...คืนสินค้า พนั") เพราะภาษาไทยไม่มีเว้นวรรคระหว่างคำ ตัดที่ไหนก็ลงกลางคำ — แสดงเต็มแล้วปล่อยให้ตัดบรรทัดเอง
+
+### 7.8 ป้ายใน UI ต้องเป็นคำ ไม่ใช่ emoji
+อาจารย์ให้เปลี่ยนไอคอนเป็นคำที่สื่อความหมาย — `tests/test_home_entrypoint.py::test_ui_labels_are_words_not_decorative_icons` fail ถ้ามีไอคอนกลับมา (ยกเว้นบรรทัดที่เป็น path ไฟล์ใน `pages/`)
+
+### 7.9 Widget key ของฟอร์มแก้ไขต้องผูกกับ id ของแถว
+Streamlit จำค่าของ widget ที่มี `key=` คงที่ข้าม rerun และไม่สนใจ `value=` — เคยทำให้หน้าจัดการผู้ใช้เอาชื่อของบัญชีก่อนหน้าไปบันทึกทับบัญชีใหม่ ใช้ `key=f"_edit_role_{user_id}"`
+
+### 7.10 เนื้อใน `st.expander` รันทุกครั้ง แม้พับอยู่
+ของที่ช้า (network, query ใหญ่) ใน expander จะทำงานทุก rerun — ต้อง `@st.cache_data`
+
 ---
 
 ## 8. ก่อน commit / ก่อนปิดงาน
@@ -271,6 +342,9 @@ markers ใช้กับ `_enforce_role_rules` ที่ scoring ตำแห�
 - [ ] ไม่แตะ `data/` (gitignored — runtime data)
 - [ ] ถ้าแก้ schema DB → migration ต้องไม่ break ของเก่า + อัปเดต `docs/database_design.md`
 - [ ] ถ้าเปลี่ยน prompt → ทดสอบ end-to-end อย่างน้อย 1 ไฟล์เสียงจริงก่อน
+- [ ] action ใหม่ที่เปลี่ยนข้อมูล → มี `audit()` บันทึกไว้
+- [ ] ห้ามลบลูกค้า/ทะเบียน/บัญชีผู้ใช้ออกจาก DB จริง — ใช้ซ่อน / ปิดใช้งาน
+- [ ] ป้ายใหม่ใน UI เป็นคำ ไม่ใช่ emoji
 
 ---
 
@@ -278,6 +352,7 @@ markers ใช้กับ `_enforce_role_rules` ที่ scoring ตำแห�
 
 | ไฟล์ | เนื้อหา |
 |------|---------|
+| `CLAUDE.md` | คู่มือสำหรับ Claude Code — เนื้อหาเดียวกับไฟล์นี้ในภาษาอังกฤษ (แก้ไฟล์หนึ่งให้แก้อีกไฟล์ด้วย) |
 | `README.md` | ภาพรวมโปรเจค + tech stack |
 | `SETUP.md` | คู่มือติดตั้งเชิงลึก + troubleshooting |
 | `ONE_CLICK_RUN.md` | คู่มือ launcher สำหรับเครื่อง demo / handoff |

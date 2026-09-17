@@ -20,10 +20,15 @@ AI-powered Call Center Analytics สำหรับสายภาษาไท�
 - ถอดเสียง + diarization + speaker correction แบบหลายชั้น โดยผสม LLM กับ heuristic rules ภาษาไทย
 - วิเคราะห์ 4 ด้านแยกกัน: summary/topic/topic_detail, sentiment, agent QA พร้อมหลักฐานคะแนน, anomaly
 - จัดกลุ่มเคสอัตโนมัติด้วย recency short-circuit ก่อนใช้ LLM match
-- Dashboard + Admin scale-friendly สำหรับ 10K+ ไฟล์ (load-limit picker, SQL-side counts), drill-down chart สำหรับประเภทความเสียหายภายใน "แจ้งปัญหาสินค้า"
+- หน้าแรก / Admin / Dashboard scale-friendly สำหรับ 10K+ ไฟล์ (load-limit picker, นับด้วย SQL, cache readiness checks — หน้าแรกเปิดใน ~0.2 วินาทีที่ 5,000 สาย), drill-down chart สำหรับประเภทความเสียหายภายใน "แจ้งปัญหาสินค้า"
 - Filter ตามทิศทางสาย (Inbound/Outbound) บนหน้า Admin และตามรหัส Agent ใน Agent Performance
 - Settings page อัจฉริยะ — auto-detect GPU + ซ่อน `cuda` ถ้าไม่พบ, auto-apply Backend/Device/Compute ที่แนะนำเมื่อเปลี่ยน Whisper model, validate combo compatibility ก่อน save
-- มี customer/warranty view, case management, case merge, login แบบ role-based (Agent ไม่เห็นหน้า Admin), และ deployment readiness checks
+- customer/warranty view, case management, case merge และ deployment readiness checks
+- **Login จริง + สิทธิ์ตาม role** — 4 บทบาท (Admin / Supervisor / QA / Agent), เมนูแสดงเฉพาะหน้าที่มีสิทธิ์, ตรวจสิทธิ์ซ้ำฝั่ง server ทุกหน้า, ล็อก 60 วินาทีเมื่อใส่รหัสผิด 5 ครั้ง
+- **นโยบายบัญชี** — Admin เปิด/ปิดบัญชีได้แต่ตั้งหรือรีเซ็ตรหัสผ่านของคนอื่นไม่ได้ (เจ้าของบัญชีเปลี่ยนเองโดยต้องกรอกรหัสเดิม) และไม่มีการลบบัญชีถาวร
+- **หน้าเพิ่มข้อมูล** (Admin) — เพิ่ม / แก้ไข / ซ่อน / กู้คืน ลูกค้าและทะเบียนรับประกัน พร้อมตรวจเบอร์และเลขทะเบียนซ้ำ และคำนวณวันหมดประกันอัตโนมัติ
+- **ไม่ลบข้อมูลลูกค้าจริง (soft delete)** — "ลบ" คือซ่อน แถวยังอยู่ในฐานข้อมูลครบและกู้คืนได้
+- **Audit log ทั้งระบบ** — บันทึกการเข้าสู่ระบบ, จัดการบัญชี, ลูกค้า/ทะเบียน, สาย, เคส และการตั้งค่า พร้อมค่าก่อน→หลัง ดูและดาวน์โหลด CSV ได้ที่หน้าประวัติการใช้งาน (Admin + Supervisor)
 
 ## Project Structure
 
@@ -89,10 +94,18 @@ smartvoice/
 | Table | คำอธิบาย |
 |-------|----------|
 | `calls` | ไฟล์เสียง, transcript, ผลวิเคราะห์ AI, สถานะ, audit uploader, และ `case_id` |
-| `customers` | ข้อมูลลูกค้า |
-| `warranty_registrations` | ทะเบียนรับประกันสินค้า |
+| `customers` | ข้อมูลลูกค้า (soft delete ผ่าน `deleted_at`) |
+| `warranty_registrations` | ทะเบียนรับประกันสินค้า (soft delete ผ่าน `deleted_at`) |
 | `call_customer_links` | ความสัมพันธ์ระหว่างสาย, ลูกค้า, และ warranty |
 | `cases` | กลุ่มสายของลูกค้าคนเดียวกันในเรื่องเดียวกัน |
+| `users` | บัญชีพนักงาน — username, ชื่อที่แสดง, role, PBKDF2 hash, สถานะเปิด/ปิด |
+| `audit_log` | ประวัติการใช้งานแบบเขียนเพิ่มอย่างเดียว — ใคร ทำอะไร กับอะไร เมื่อไหร่ ค่าก่อน→หลัง |
+
+รายละเอียดคอลัมน์ทั้งหมดอยู่ใน [`docs/database_design.md`](docs/database_design.md)
+
+## First Login
+
+เปิดแอปครั้งแรก ระบบสร้างบัญชี `admin` / `admin1234` ให้อัตโนมัติ — **เปลี่ยนรหัสผ่านทันที** ที่กล่องบัญชีใน sidebar (ระบบจะเตือนค้างไว้จนกว่าจะเปลี่ยน) แล้วสร้างบัญชีพนักงานที่หน้า "จัดการผู้ใช้"
 
 ## Quick Start
 
@@ -173,4 +186,4 @@ Audio (.wav/.mp3)
 & ".venv\Scripts\python.exe" -m pytest tests\ --ignore=tests\test_config.py -q
 ```
 
-ผลล่าสุดที่ยืนยันแล้ว: `304 passed` (ทดสอบเมื่อ 2026-09-04)
+ผลล่าสุดที่ยืนยันแล้ว: `305 passed` (ทดสอบเมื่อ 2026-09-17)

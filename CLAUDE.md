@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 304 tests, must pass 100% before every commit.
+**Current test baseline:** 305 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -52,7 +52,7 @@ ollama serve
 | `file_manager.py` | Audio upload + SHA-256 deduplication. Filename helpers: `extract_phone_from_filename()`, `extract_direction_from_filename()` (Inbound/Outbound), `extract_agent_code_from_filename()` |
 | `env_settings.py` | `.env` read/write + UI helpers: `gpu_available()`, `gpu_device_name()`, `validate_whisper_combo()` (model/backend/device/compute compatibility), `recommended_combo_for_model()` (auto-apply on model change) |
 | `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
-| `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page, and the place every `audit_log` entry is written (phone normalisation, duplicate guards that skip the row being edited, `diff_fields()` before/after, warranty expiry maths) — no Streamlit import, so it is unit-testable |
+| `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths); writes its own audit entries through `audit.record()` — no Streamlit import, so it is unit-testable |
 | `audit.py` | Audit-trail vocabulary + `record()` — action/entity constants, Thai labels, secret redaction, `diff_fields()`. Every page logs through it (`ui_helpers.audit()` fills in the signed-in user) |
 | `auth.py` | PBKDF2 hashing, DB/`.env` account lookup, role → page permission matrix (`ROLE_PERMISSIONS`, `can_access()`, `visible_pages()`) |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
@@ -261,6 +261,10 @@ Key behaviors:
 - **Common Whisper errors:** "โอมาสนา"/"โนโลตัส"/"ฟิวทู" for brand names; "ที่โน่น"/"ทีเนี่ย" for "ที่นอน"; Thai phone numbers often mixed Thai/Arabic digits.
 - **PowerShell:** Never use `cd` — set `Cwd` parameter instead.
 - **Imports** must be at the top of every file; never mid-file.
+- **Never slice Thai text to a character count** (`summary[:100]`). Thai has no spaces between words, so the cut always lands mid-word — show the text in full and let it wrap.
+- **Streamlit widget keys that edit a picked row must include the row id** (`key=f"_edit_role_{user_id}"`). With a fixed key Streamlit keeps the previous row's value and ignores `value=`, so switching rows saves stale data over the new one.
+- **An `st.expander` body runs even while collapsed.** Anything slow inside it (network checks, big queries) runs on every rerun — cache it.
+- **UI labels are words, not emoji.** `tests/test_home_entrypoint.py` fails if a decorative icon comes back. The page *file names* (`pages/1_📤_Admin.py`) still contain emoji and `Home.py` routes to those exact paths — don't strip them.
 
 ## Pre-commit Checklist
 
