@@ -51,7 +51,12 @@ ROLE_LABELS_TH = {
 
 PAGE_HOME = "home"
 PAGE_ADMIN = "admin"
-PAGE_DASHBOARD = "dashboard"
+PAGE_DASHBOARD = "dashboard"            # Dashboard → ภาพรวม
+PAGE_INSIGHTS = "insights"              # Dashboard → คีย์เวิร์ด แบรนด์ ช่องทาง
+PAGE_ANOMALY = "anomaly"                # Dashboard → ความผิดปกติ
+PAGE_AGENT_PERFORMANCE = "agent_performance"  # Dashboard → ผลงาน Agent
+PAGE_CALLS = "calls"                    # Dashboard → รายการสาย
+PAGE_CASES = "cases"                    # จัดการเคส (รับเคส / ปิดเคส)
 PAGE_CUSTOMERS = "customers"
 PAGE_DATA_ENTRY = "data_entry"
 PAGE_AUDIT = "audit"
@@ -63,6 +68,11 @@ PAGE_ORDER = (
     PAGE_HOME,
     PAGE_ADMIN,
     PAGE_DASHBOARD,
+    PAGE_INSIGHTS,
+    PAGE_ANOMALY,
+    PAGE_AGENT_PERFORMANCE,
+    PAGE_CALLS,
+    PAGE_CASES,
     PAGE_CUSTOMERS,
     PAGE_DATA_ENTRY,
     PAGE_AUDIT,
@@ -70,10 +80,26 @@ PAGE_ORDER = (
     PAGE_USERS,
 )
 
+# The Dashboard used to be one long page; it is now split into these pages,
+# shown together under one "Dashboard" heading in the sidebar. They share the
+# call filters (smartvoice.dashboard_common) and the same role permissions.
+DASHBOARD_PAGES = (
+    PAGE_DASHBOARD,
+    PAGE_INSIGHTS,
+    PAGE_ANOMALY,
+    PAGE_AGENT_PERFORMANCE,
+    PAGE_CALLS,
+)
+
 PAGE_LABELS_TH = {
     PAGE_HOME: "หน้าแรก",
     PAGE_ADMIN: "Admin — อัปโหลด/ประมวลผล",
-    PAGE_DASHBOARD: "Dashboard",
+    PAGE_DASHBOARD: "Dashboard — ภาพรวม",
+    PAGE_INSIGHTS: "Dashboard — คีย์เวิร์ด แบรนด์ ช่องทาง",
+    PAGE_ANOMALY: "Dashboard — ความผิดปกติ",
+    PAGE_AGENT_PERFORMANCE: "Dashboard — ผลงาน Agent",
+    PAGE_CALLS: "Dashboard — รายการสาย",
+    PAGE_CASES: "จัดการเคส",
     PAGE_CUSTOMERS: "ลูกค้า & การรับประกัน",
     PAGE_DATA_ENTRY: "เพิ่มลูกค้า & ทะเบียนรับประกัน",
     PAGE_AUDIT: "ประวัติการใช้งาน (Audit log)",
@@ -89,7 +115,8 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         {
             PAGE_HOME,
             PAGE_ADMIN,
-            PAGE_DASHBOARD,
+            *DASHBOARD_PAGES,
+            PAGE_CASES,
             PAGE_CUSTOMERS,
             PAGE_DATA_ENTRY,
             PAGE_AUDIT,
@@ -98,10 +125,18 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
         }
     ),
     "Supervisor": frozenset(
-        {PAGE_HOME, PAGE_ADMIN, PAGE_DASHBOARD, PAGE_CUSTOMERS, PAGE_AUDIT, PAGE_SETTINGS}
+        {
+            PAGE_HOME,
+            PAGE_ADMIN,
+            *DASHBOARD_PAGES,
+            PAGE_CASES,
+            PAGE_CUSTOMERS,
+            PAGE_AUDIT,
+            PAGE_SETTINGS,
+        }
     ),
-    "QA": frozenset({PAGE_HOME, PAGE_DASHBOARD, PAGE_CUSTOMERS}),
-    "Agent": frozenset({PAGE_HOME, PAGE_DASHBOARD, PAGE_CUSTOMERS}),
+    "QA": frozenset({PAGE_HOME, *DASHBOARD_PAGES, PAGE_CASES, PAGE_CUSTOMERS}),
+    "Agent": frozenset({PAGE_HOME, *DASHBOARD_PAGES, PAGE_CASES, PAGE_CUSTOMERS}),
 }
 
 # Anything we don't recognise falls back to the least-privileged role.

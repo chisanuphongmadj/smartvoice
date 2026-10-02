@@ -18,11 +18,16 @@ st.set_page_config(
 from smartvoice import db
 from smartvoice.auth import (
     PAGE_ADMIN,
+    PAGE_AGENT_PERFORMANCE,
+    PAGE_ANOMALY,
     PAGE_AUDIT,
+    PAGE_CALLS,
+    PAGE_CASES,
     PAGE_CUSTOMERS,
     PAGE_DASHBOARD,
     PAGE_DATA_ENTRY,
     PAGE_HOME,
+    PAGE_INSIGHTS,
     PAGE_SETTINGS,
     PAGE_USERS,
     role_label,
@@ -103,7 +108,12 @@ def home_page():
 _PAGE_SPECS = {
     PAGE_HOME: dict(page=home_page, title="หน้าแรก", url_path="home", default=True),
     PAGE_ADMIN: dict(page="pages/1_📤_Admin.py", title="Admin", url_path="admin"),
-    PAGE_DASHBOARD: dict(page="pages/2_📊_Dashboard.py", title="Dashboard", url_path="dashboard"),
+    PAGE_DASHBOARD: dict(page="pages/2_📊_Dashboard.py", title="ภาพรวม", url_path="dashboard"),
+    PAGE_INSIGHTS: dict(page="pages/8_Dashboard_Insights.py", title="คีย์เวิร์ด แบรนด์ ช่องทาง", url_path="insights"),
+    PAGE_ANOMALY: dict(page="pages/9_Dashboard_Anomaly.py", title="ความผิดปกติ", url_path="anomaly"),
+    PAGE_AGENT_PERFORMANCE: dict(page="pages/10_Agent_Performance.py", title="ผลงาน Agent", url_path="agent-performance"),
+    PAGE_CALLS: dict(page="pages/12_Call_Summaries.py", title="รายการสาย", url_path="calls"),
+    PAGE_CASES: dict(page="pages/11_Cases.py", title="จัดการเคส", url_path="cases"),
     PAGE_CUSTOMERS: dict(page="pages/3_👥_Customers.py", title="Customers", url_path="customers"),
     PAGE_DATA_ENTRY: dict(page="pages/6_➕_Data_Entry.py", title="เพิ่มข้อมูล", url_path="data-entry"),
     PAGE_AUDIT: dict(page="pages/7_📜_Audit_Log.py", title="ประวัติการใช้งาน", url_path="audit-log"),
@@ -112,8 +122,32 @@ _PAGE_SPECS = {
 }
 
 
-def _build_navigation(role: str):
-    return [st.Page(**_PAGE_SPECS[key]) for key in visible_pages(role)]
+# Sidebar headings. "" puts the home page above every heading. A page missing
+# from this map would land in "อื่นๆ" rather than vanish from the menu.
+_SECTIONS = {
+    PAGE_HOME: "",
+    PAGE_DASHBOARD: "Dashboard",
+    PAGE_INSIGHTS: "Dashboard",
+    PAGE_ANOMALY: "Dashboard",
+    PAGE_AGENT_PERFORMANCE: "Dashboard",
+    PAGE_CALLS: "Dashboard",
+    PAGE_CASES: "งานลูกค้า",
+    PAGE_CUSTOMERS: "งานลูกค้า",
+    PAGE_DATA_ENTRY: "งานลูกค้า",
+    PAGE_ADMIN: "ผู้ดูแลระบบ",
+    PAGE_AUDIT: "ผู้ดูแลระบบ",
+    PAGE_SETTINGS: "ผู้ดูแลระบบ",
+    PAGE_USERS: "ผู้ดูแลระบบ",
+}
+_SECTION_ORDER = ("", "Dashboard", "งานลูกค้า", "ผู้ดูแลระบบ", "อื่นๆ")
+
+
+def _build_navigation(role: str) -> dict[str, list]:
+    """{sidebar heading: [pages]} holding only the pages `role` may open."""
+    grouped: dict[str, list] = {section: [] for section in _SECTION_ORDER}
+    for key in visible_pages(role):
+        grouped[_SECTIONS.get(key, "อื่นๆ")].append(st.Page(**_PAGE_SPECS[key]))
+    return {section: pages for section, pages in grouped.items() if pages}
 
 
 _user, _role = get_current_user()

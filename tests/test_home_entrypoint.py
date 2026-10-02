@@ -108,6 +108,11 @@ def test_every_page_file_enforces_its_role_permission():
         "5_👤_Users.py": auth.PAGE_USERS,
         "6_➕_Data_Entry.py": auth.PAGE_DATA_ENTRY,
         "7_📜_Audit_Log.py": auth.PAGE_AUDIT,
+        "8_Dashboard_Insights.py": auth.PAGE_INSIGHTS,
+        "9_Dashboard_Anomaly.py": auth.PAGE_ANOMALY,
+        "10_Agent_Performance.py": auth.PAGE_AGENT_PERFORMANCE,
+        "11_Cases.py": auth.PAGE_CASES,
+        "12_Call_Summaries.py": auth.PAGE_CALLS,
     }
     for filename, page_key in guarded.items():
         source = Path("pages") / filename
@@ -137,3 +142,34 @@ def test_login_no_longer_lets_a_visitor_pick_their_own_role():
 
     assert "STAFF_ROLES" not in ui_helpers
     assert 'st.selectbox("บทบาท"' not in ui_helpers
+
+
+def test_dashboard_is_split_into_pages_under_one_sidebar_heading():
+    """The Dashboard was one ~1,000-line page — too much to read at once. Each
+    topic is its own page now, grouped under a "Dashboard" heading."""
+    from smartvoice import auth
+
+    home = Path("Home.py").read_text(encoding="utf-8")
+    for page_key in auth.DASHBOARD_PAGES:
+        assert f'PAGE_{page_key.upper()}: "Dashboard"' in home, f"{page_key} not under Dashboard"
+    # Every role that sees the Dashboard sees all of it, as before the split.
+    for role in auth.ROLES:
+        assert all(auth.can_access(role, page) for page in auth.DASHBOARD_PAGES)
+        assert auth.can_access(role, auth.PAGE_CASES)
+
+    overview = Path("pages/2_📊_Dashboard.py").read_text(encoding="utf-8")
+    assert "Agent Performance" not in overview
+    assert "Case Management" not in overview
+    assert len(overview.splitlines()) < 250
+
+
+def test_every_dashboard_page_uses_the_shared_filters():
+    for name in (
+        "2_📊_Dashboard.py",
+        "8_Dashboard_Insights.py",
+        "9_Dashboard_Anomaly.py",
+        "10_Agent_Performance.py",
+        "12_Call_Summaries.py",
+    ):
+        text = (Path("pages") / name).read_text(encoding="utf-8")
+        assert "load_filtered_calls()" in text, f"{name} has its own filters"

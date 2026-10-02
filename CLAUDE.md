@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 333 tests, must pass 100% before every commit.
+**Current test baseline:** 342 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -61,7 +61,15 @@ ollama serve
 
 `Home.py` is the router (see **Login & role-based navigation**), not just a landing page.
 
-Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py`, `3_👥_Customers.py`, `4_Settings.py`, `5_👤_Users.py`, `6_➕_Data_Entry.py`, `7_📜_Audit_Log.py`
+Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py` (Dashboard → ภาพรวม), `3_👥_Customers.py`, `4_Settings.py`, `5_👤_Users.py`, `6_➕_Data_Entry.py`, `7_📜_Audit_Log.py`, `8_Dashboard_Insights.py`, `9_Dashboard_Anomaly.py`, `10_Agent_Performance.py`, `11_Cases.py` (จัดการเคส), `12_Call_Summaries.py`
+
+### Dashboard is split into pages
+
+The Dashboard used to be one ~1,000-line page; the professor found it too hard to read, so each topic is its own page (`auth.DASHBOARD_PAGES`), shown under one **Dashboard** heading in the sidebar. `Home._SECTIONS` maps every page to a sidebar heading (`""` = top, no heading).
+
+- Every Dashboard page calls `dashboard_common.load_filtered_calls()` — one shared filter bar (date / topic / sentiment / load limit). Streamlit drops widget state when another page runs, so the values are mirrored into `_keep_*` session keys and restored before the widgets draw (`restore_filters()` / `remember_filters()`). Saved date ranges are clamped to the loaded calls because `st.date_input` raises when its value is outside min/max.
+- Chart styling (`CHART_LAYOUT`, palettes, `hbar()`) lives in `dashboard_common` too — new charts should use it rather than copy the Plotly settings.
+- `11_Cases.py` reads cases straight from SQL and loads no calls.
 
 ### Speaker correction pipeline (`pipeline.py:1408-1459`)
 
@@ -148,7 +156,7 @@ These pages avoid loading rows they don't display, so they stay responsive at 10
 
 - **Home** (`Home.py`): the four cards come from `count_calls_by_status()`. Counting with `get_all_calls()` (a `SELECT *`) pulled every transcript into memory — measured ~278 ms and ~57 MB per page view at 5,000 calls. The readiness checks are wrapped in `@st.cache_data(ttl=300)` because an expander body runs even while collapsed and those checks hit Ollama/HuggingFace over the network (~2.6 s); together this took a home render from 2.9 s to 0.2 s at 5,000 calls.
 - **Admin** (`pages/1_📤_Admin.py`): top metric cards read from `count_calls_by_status()` (SQL `GROUP BY`) so they're accurate even when only the latest-N rows are loaded for display. Load-limit picker defaults to `200 ล่าสุด` when total > 200, else `ทั้งหมด`. "Process All Pending" uses `get_pending_call_ids()` (lazy) so old pending calls aren't missed. The `@st.fragment(run_every=3)` auto-refresh queries only `get_processing_calls()` (typically 0-1 rows) instead of the full table.
-- **Dashboard** (`pages/2_📊_Dashboard.py`): load-limit picker defaults to `1,000 ล่าสุด` when total > 1000, else `ทั้งหมด`. Analytics signal quality matters more here than first-paint speed, so the default is larger than on Admin.
+- **Dashboard** (all pages via `dashboard_common.load_filtered_calls()`): load-limit picker defaults to `1,000 ล่าสุด` when total > 1000, else `ทั้งหมด`. Analytics signal quality matters more here than first-paint speed, so the default is larger than on Admin.
 
 ## Filename-derived filters
 
@@ -156,7 +164,7 @@ Three pieces of metadata are derived from the CDR filename pattern `YYYYMMDDHHMM
 
 - **Phone** — `extract_phone_from_filename()` (used during upload for customer auto-link)
 - **Direction** — `extract_direction_from_filename()` → powers the Inbound/Outbound radio filter on Admin
-- **Agent extension** — `extract_agent_code_from_filename()` → powers the Agent dropdown filter on the Dashboard Agent Performance section. Returns the short numeric segment (2-5 digits) that isn't the 14-digit timestamp or a 10-digit Thai phone.
+- **Agent extension** — `extract_agent_code_from_filename()` → powers the Agent dropdown filter on the Agent Performance page (`10_Agent_Performance.py`). Returns the short numeric segment (2-5 digits) that isn't the 14-digit timestamp or a 10-digit Thai phone.
 
 No DB migration needed for direction/agent — derive at filter-time.
 
@@ -172,12 +180,14 @@ No DB migration needed for direction/agent — derive at filter-time.
 
 Permissions live in one place, `auth.ROLE_PERMISSIONS`:
 
-| Role | home | admin | dashboard | customers | data_entry | audit | settings | users |
+| Role | home | admin | dashboard pages* + cases | customers | data_entry | audit | settings | users |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | Admin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Supervisor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
 | QA | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Agent | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+
+\* `auth.DASHBOARD_PAGES` — dashboard, insights, anomaly, agent_performance, calls. Every role sees all of them plus `cases`.
 
 Rules to keep intact:
 
@@ -228,7 +238,7 @@ readable on `pages/7_📜_Audit_Log.py` (Admin + Supervisor):
 | `customer_entry` | customer / warranty create, update, hide, restore |
 | `pages/5_👤_Users.py` | account create, role & status change (enable/disable) |
 | `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case subject/merge |
-| `case_workflow` | case claim / release / status change (Dashboard + Admin both call it via `ui_helpers.render_case_ownership()`) |
+| `case_workflow` | case claim / release / status change (Cases + Admin pages both call it via `ui_helpers.render_case_ownership()`) |
 | `pages/4_Settings.py` | `.env` saves and the Quick Mode presets |
 
 Rules that keep the trail trustworthy:
