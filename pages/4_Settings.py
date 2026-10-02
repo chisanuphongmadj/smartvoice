@@ -17,6 +17,7 @@ from smartvoice.env_settings import (
     write_env,
 )
 from smartvoice import audit as audit_trail
+from smartvoice import discord_notify
 from smartvoice.auth import PAGE_SETTINGS
 from smartvoice.preflight import run_preflight_checks
 from smartvoice.ui_helpers import audit, init_page
@@ -196,6 +197,30 @@ whisper_compute = st.selectbox(
     ),
 )
 
+st.markdown("#### แจ้งเตือน Discord")
+st.caption(
+    "ส่งข้อความเข้าช่อง Discord ทุกครั้งที่มีคนรับเคส คืนเคส ปิดเคส หรือเปิดเคสอีกครั้ง — "
+    "สร้าง webhook ได้ที่ Discord: ตั้งค่าช่อง → Integrations → Webhooks → New Webhook → Copy Webhook URL"
+)
+_saved_webhook = values.get(discord_notify.ENV_KEY, "")
+st.caption(f"Webhook ปัจจุบัน: `{mask_secret(_saved_webhook) or 'ยังไม่ได้ตั้งค่า (ไม่ส่งแจ้งเตือน)'}`")
+discord_webhook = st.text_input(
+    "Discord webhook URL",
+    value="",
+    type="password",
+    placeholder="เว้นว่างไว้ = ใช้ค่าเดิม",
+    help="URL นี้เป็นความลับ — ใครมี URL ก็โพสต์เข้าช่องได้ ระบบจึงไม่แสดงเต็มและไม่บันทึกลง Audit log",
+    key="_discord_webhook_input",
+)
+clear_discord_webhook = st.checkbox("ปิดการแจ้งเตือน Discord (ลบ webhook ที่บันทึกไว้)")
+if st.button("ส่งข้อความทดสอบ", key="_discord_test_btn",
+             help="ใช้ URL ที่พิมพ์ไว้ด้านบน ถ้าเว้นว่างจะใช้ค่าที่บันทึกไว้"):
+    _ok, _detail = discord_notify.post(
+        discord_notify.build_test_payload(current_user),
+        url=discord_webhook.strip() or None,
+    )
+    (st.success if _ok else st.error)(_detail)
+
 submitted = st.button("Save Settings", use_container_width=True, type="primary")
 
 if submitted:
@@ -213,7 +238,19 @@ if submitted:
     elif hf_token.strip():
         updates["HF_TOKEN"] = hf_token.strip()
 
-    # HF_TOKEN is redacted by smartvoice.audit before it reaches the log.
+    webhook_error = None
+    if clear_discord_webhook:
+        updates[discord_notify.ENV_KEY] = ""
+    elif discord_webhook.strip():
+        if discord_notify.is_valid_webhook_url(discord_webhook):
+            updates[discord_notify.ENV_KEY] = discord_webhook.strip()
+        else:
+            webhook_error = (
+                "ไม่ได้บันทึก Discord webhook — URL ต้องขึ้นต้นด้วย "
+                "`https://discord.com/api/webhooks/` (ค่าอื่นบันทึกแล้วตามปกติ)"
+            )
+
+    # HF_TOKEN / DISCORD_WEBHOOK_URL are redacted by smartvoice.audit before they reach the log.
     changed = audit_trail.diff_fields(values, updates)
     write_env(updates)
     if changed:
@@ -222,6 +259,8 @@ if submitted:
             entity_label="Save Settings", changes=changed,
         )
     st.success("Saved to `.env`. Restart the app with `run.bat` so every module uses the new settings.")
+    if webhook_error:
+        st.error(webhook_error)
 
     # Run combo validation after save so the user sees actionable feedback
     # before the next `process_call()` would otherwise crash.

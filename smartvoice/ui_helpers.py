@@ -2,11 +2,12 @@
 
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 
 from smartvoice import audit as audit_trail
-from smartvoice import db, pipeline
+from smartvoice import case_workflow, db, pipeline
 from smartvoice.auth import (
     DEFAULT_ADMIN_PASSWORD,
     DEFAULT_ADMIN_USERNAME,
@@ -410,6 +411,103 @@ def metric_card(value, label: str, color: str | None = None) -> str:
         f'<div class="metric-value"{style}>{value}</div>'
         f'<div class="metric-label">{label}</div></div>'
     )
+
+
+# ── Case ownership panel ─────────────────────────────────────────────────
+
+_BANGKOK = timezone(timedelta(hours=7))
+
+
+def _bangkok_time(ts: str | None) -> str:
+    """'2026-05-20T05:27:59+00:00' → '2026-05-20 12:27 น.' (Thai time)."""
+    if not ts:
+        return "-"
+    try:
+        parsed = datetime.fromisoformat(ts)
+    except ValueError:
+        return ts
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_BANGKOK).strftime("%Y-%m-%d %H:%M น.")
+
+
+def current_case_actor() -> case_workflow.Actor:
+    user, role = get_current_user()
+    return case_workflow.Actor(
+        username=st.session_state.get("current_username") or "",
+        name=user or "",
+        role=role or "",
+    )
+
+
+def render_case_ownership(case: dict, key_suffix: str | int = "") -> None:
+    """Who owns `case`, plus the claim / status / release buttons this user may press.
+
+    `case` is a `db.get_case_detail()` / `db.get_all_cases()` row. `key_suffix`
+    keeps widget keys unique when one case is drawn more than once on a page
+    (the Admin page shows it under every call it contains).
+    """
+    case_id = case["id"]
+    actor = current_case_actor()
+    flash_key = f"_case_flash_{case_id}"
+    flash = st.session_state.pop(flash_key, None)
+    if flash:
+        (st.success if flash[0] else st.error)(flash[1])
+
+    def _key(name: str) -> str:
+        return f"case_{name}_{case_id}_{key_suffix}"
+
+    def _apply(result: tuple[bool, str]) -> None:
+        st.session_state[flash_key] = result
+        st.rerun()
+
+    status = case.get("status")
+    owner = case.get("assignee_name") or case.get("assignee_username")
+    mine = case_workflow.is_owner(case, actor)
+
+    if owner:
+        you = " (คุณ)" if mine else ""
+        st.markdown(f"**ผู้รับเคส:** {owner}{you} — รับเมื่อ {_bangkok_time(case.get('assigned_at'))}")
+    else:
+        st.markdown("**ผู้รับเคส:** ยังไม่มีคนรับ")
+    if status == "closed" and case.get("closed_by"):
+        st.caption(f"ปิดเคสโดย {case['closed_by']} เมื่อ {_bangkok_time(case.get('closed_at'))}")
+
+    if not owner:
+        error = case_workflow.claim_error(case, actor)
+        if error is None:
+            if st.button("รับเคสนี้", key=_key("claim"), type="primary"):
+                _apply(case_workflow.claim(case_id, actor))
+        else:
+            st.caption(error)
+        return
+
+    if mine:
+        if status == "closed":
+            if st.button("เปิดเคสอีกครั้ง", key=_key("reopen")):
+                _apply(case_workflow.change_status(case_id, "open", actor))
+            return
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if status == "open":
+                if st.button("ตั้งเป็น ติดตาม", key=_key("follow"), use_container_width=True):
+                    _apply(case_workflow.change_status(case_id, "follow_up", actor))
+            elif st.button("กลับเป็น เปิด", key=_key("open"), use_container_width=True):
+                _apply(case_workflow.change_status(case_id, "open", actor))
+        with c2:
+            if st.button("ปิดเคส", key=_key("close"), type="primary", use_container_width=True):
+                _apply(case_workflow.change_status(case_id, "closed", actor))
+        with c3:
+            if st.button("คืนเคส", key=_key("release"), use_container_width=True,
+                         help="ยกเลิกการรับเคส ให้คนอื่นรับต่อได้"):
+                _apply(case_workflow.release(case_id, actor))
+        return
+
+    st.info(f"เคสนี้ {owner} รับไว้แล้ว — เปลี่ยนสถานะหรือปิดเคสได้เฉพาะผู้รับเคส")
+    if case_workflow.release_error(case, actor) is None:
+        if st.button(f"ปลด {owner} ออกจากเคส", key=_key("force_release"),
+                     help="สำหรับหัวหน้างาน เช่น ผู้รับเคสลาออก/ลาพัก — เคสจะว่างให้คนอื่นรับ"):
+            _apply(case_workflow.release(case_id, actor))
 
 
 # ── Background processing ────────────────────────────────────────────────

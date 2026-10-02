@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 305 tests, must pass 100% before every commit.
+**Current test baseline:** 333 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -54,6 +54,8 @@ ollama serve
 | `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
 | `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths); writes its own audit entries through `audit.record()` — no Streamlit import, so it is unit-testable |
 | `audit.py` | Audit-trail vocabulary + `record()` — action/entity constants, Thai labels, secret redaction, `diff_fields()`. Every page logs through it (`ui_helpers.audit()` fills in the signed-in user) |
+| `case_workflow.py` | Case ownership rules — `claim()` / `release()` / `change_status()`; only the claimer changes status, Admin/Supervisor may release (not take) someone's claim, QA can't claim. Logs to audit + notifies Discord. No Streamlit import |
+| `discord_notify.py` | Discord incoming-webhook sender (`DISCORD_WEBHOOK_URL`); background thread, never raises, `allowed_mentions` off, phone masked to last 4 digits |
 | `auth.py` | PBKDF2 hashing, DB/`.env` account lookup, role → page permission matrix (`ROLE_PERMISSIONS`, `can_access()`, `visible_pages()`) |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
 
@@ -225,7 +227,8 @@ readable on `pages/7_📜_Audit_Log.py` (Admin + Supervisor):
 | `ui_helpers` login flow | `login`, `login_failed`, `logout`, self-service password change |
 | `customer_entry` | customer / warranty create, update, hide, restore |
 | `pages/5_👤_Users.py` | account create, role & status change (enable/disable) |
-| `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case status/subject/merge |
+| `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case subject/merge |
+| `case_workflow` | case claim / release / status change (Dashboard + Admin both call it via `ui_helpers.render_case_ownership()`) |
 | `pages/4_Settings.py` | `.env` saves and the Quick Mode presets |
 
 Rules that keep the trail trustworthy:
@@ -240,6 +243,12 @@ Rules that keep the trail trustworthy:
   and an edit that changes nothing writes no entry at all.
 - Adding a new mutating action means adding an `audit()` call next to it —
   `tests/test_audit.py` checks that every page which changes data touches the trail.
+
+## Case ownership (claim / no stealing / Discord)
+
+- A case is claimed with `db.claim_case()` — one `UPDATE ... WHERE assignee_username IS NULL AND status != 'closed'`, so two simultaneous clicks can't both win. Status changes go through `db.set_case_status_as_assignee()`, which checks the owner in its `WHERE` too. Never change a case's status from a page with `db.update_case_status()` — that helper is for the pipeline's auto `follow_up` only.
+- UI for every role lives in `ui_helpers.render_case_ownership(case, key_suffix)`; keys include the case id and a suffix because the Admin page draws the same case under each of its calls.
+- Discord: `DISCORD_WEBHOOK_URL` (Settings page). Unset → nothing is sent. The URL is a secret and `audit.redact()` drops it.
 
 ## Settings page behavior
 
@@ -283,5 +292,6 @@ Configure via `smartvoice/.env` (copy from `.env.example`). Key variables:
 - `MOCK_STT=true` — fast development mode without GPU
 - `DB_PATH` — defaults to `data/smartvoice.db`
 - `CASE_RECENCY_HOURS` — window for recency-based case attachment
+- `DISCORD_WEBHOOK_URL` — case claim/close notifications (blank = off)
 
 `data/` and `.env` are gitignored (runtime data + secrets).

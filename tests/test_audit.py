@@ -57,6 +57,7 @@ def test_every_action_and_entity_has_a_thai_label():
     actions = {
         audit.CREATE, audit.UPDATE, audit.DELETE, audit.RESTORE,
         audit.LOGIN, audit.LOGIN_FAILED, audit.LOGOUT,
+        audit.CLAIM, audit.RELEASE,
     }
     entities = {
         audit.ENTITY_CUSTOMER, audit.ENTITY_WARRANTY, audit.ENTITY_USER,
@@ -89,6 +90,7 @@ def test_staff_actions_are_logged_from_every_page_that_changes_data():
         "pages/5_👤_Users.py",       # account management
         "smartvoice/ui_helpers.py",  # login / logout / self-service password change
         "smartvoice/customer_entry.py",
+        "smartvoice/case_workflow.py",  # claim / release / status of a case
     ):
         source = Path(path).read_text(encoding="utf-8")
         assert "audit" in source, f"{path} changes data without touching the audit trail"

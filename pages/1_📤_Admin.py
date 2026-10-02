@@ -6,16 +6,18 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — Admin", layout="wide")
 
 from smartvoice import audit as audit_trail
-from smartvoice import db, file_manager
+from smartvoice import case_workflow, db, file_manager
 from smartvoice.auth import PAGE_ADMIN, role_label
 from smartvoice.file_manager import extract_direction_from_filename
 from smartvoice.preflight import get_ollama_readiness, ollama_setup_lines
 from smartvoice.ui_helpers import (
     audit,
+    current_case_actor,
     init_page,
     launch_processing,
     launch_processing_queue,
     metric_card,
+    render_case_ownership,
     status_badge,
 )
 
@@ -476,44 +478,27 @@ else:
 
                 # Case info
                 if call.get("case_id"):
-                    case = db.get_case_by_id(call["case_id"])
+                    case = db.get_case_detail(call["case_id"])
                     if case:
                         _case_status_map = {"open": "เปิด", "follow_up": "ติดตาม", "closed": "ปิด"}
                         _cs = _case_status_map.get(case["status"], case["status"])
+                        _owner = case.get("assignee_name") or "ยังไม่มีคนรับ"
                         sibling_calls = db.get_calls_by_case(case["id"])
-                        with st.expander(f"เคส #{case['id']}: {case['subject']}  —  สถานะ: {_cs}  ({len(sibling_calls)} สาย)"):
+                        with st.expander(f"เคส #{case['id']}: {case['subject']}  —  สถานะ: {_cs}  •  ผู้รับเคส: {_owner}  ({len(sibling_calls)} สาย)"):
                             if len(sibling_calls) > 1:
                                 for oc in sibling_calls:
                                     _mark = "สายนี้:" if oc["id"] == call["id"] else "  ↳"
                                     st.caption(f"{_mark} {oc['filename']}  ({_st_label.get(oc['status'], oc['status'])})")
                             cs_col1, cs_col2 = st.columns(2)
                             with cs_col1:
-                                _status_options = ["open", "follow_up", "closed"]
-                                _cur_idx = _status_options.index(case["status"]) if case["status"] in _status_options else 0
-                                new_status = st.selectbox(
-                                    "เปลี่ยนสถานะเคส",
-                                    _status_options,
-                                    index=_cur_idx,
-                                    format_func=lambda s: {"open": "เปิด", "follow_up": "ติดตาม", "closed": "ปิด"}.get(s, s),
-                                    key=f"case_status_{call['id']}",
-                                )
-                                if new_status != case["status"]:
-                                    if st.button("บันทึกสถานะ", key=f"case_upd_{call['id']}"):
-                                        db.update_case_status(case["id"], new_status)
-                                        audit(
-                                            audit_trail.UPDATE,
-                                            audit_trail.ENTITY_CASE,
-                                            entity_id=case["id"],
-                                            entity_label=case["subject"],
-                                            changes={"status": [case["status"], new_status]},
-                                        )
-                                        st.success(f"อัปเดทเคส #{case['id']} → {new_status}")
-                                        st.rerun()
+                                # Claim / status / release — status changes only by
+                                # whoever claimed the case (smartvoice.case_workflow).
+                                render_case_ownership(case, key_suffix=f"call{call['id']}")
                             with cs_col2:
                                 new_subject = st.text_input(
                                     "แก้ไขหัวข้อเคส",
                                     value=case["subject"],
-                                    key=f"case_subj_{call['id']}",
+                                    key=f"case_subj_{call['id']}_{case['id']}",
                                 )
                                 if new_subject != case["subject"]:
                                     if st.button("บันทึกหัวข้อ", key=f"case_subj_btn_{call['id']}"):
@@ -535,7 +520,16 @@ else:
                                     cs for cs in db.get_cases_by_customer(link_info["customer_id"])
                                     if cs["id"] != case["id"]
                                 ]
-                                if other_cases:
+                                _held_by_other = case.get("assignee_username") and not case_workflow.is_owner(
+                                    case, current_case_actor()
+                                )
+                                if other_cases and _held_by_other:
+                                    st.markdown("---")
+                                    st.caption(
+                                        f"รวมเคสไม่ได้ — เคสนี้ {case['assignee_name']} รับไว้อยู่ "
+                                        "ต้องคืนเคสหรือปลดผู้รับเคสก่อน"
+                                    )
+                                elif other_cases:
                                     st.markdown("---")
                                     st.caption("**รวมเข้ากับเคสอื่น** (ย้ายสายทั้งหมดจากเคสนี้ไปอีกเคส)")
                                     merge_opts = {

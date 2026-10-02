@@ -144,6 +144,20 @@ def init_db() -> None:
 def _migrate(conn: sqlite3.Connection) -> None:
     _migrate_calls(conn)
     _migrate_soft_delete(conn)
+    _migrate_case_assignment(conn)
+
+
+def _migrate_case_assignment(conn: sqlite3.Connection) -> None:
+    """Add the case-ownership columns to existing databases.
+
+    A staff member claims a case (`assignee_*`); from then on only they can
+    change its status, so nobody else can take it over. `closed_by` /
+    `closed_at` record who closed it, since the assignee can be released later.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
+    for col in ("assignee_username", "assignee_name", "assigned_at", "closed_by", "closed_at"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE cases ADD COLUMN {col} TEXT")
 
 
 def _migrate_soft_delete(conn: sqlite3.Connection) -> None:
@@ -966,6 +980,80 @@ def get_case_by_id(case_id: int) -> dict | None:
     return dict(row) if row else None
 
 
+def get_case_detail(case_id: int) -> dict | None:
+    """One case plus its customer's name/phone and call count (for the case
+    panel and the Discord message)."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT cs.*, c.first_name, c.last_name, c.phone,
+                  (SELECT COUNT(*) FROM calls cl WHERE cl.case_id = cs.id) AS call_count
+           FROM cases cs
+           LEFT JOIN customers c ON c.id = cs.customer_id
+           WHERE cs.id = ?""",
+        (case_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def claim_case(case_id: int, username: str, name: str) -> bool:
+    """Make `username` the owner of an unclaimed, not-closed case.
+
+    The check and the write are one UPDATE, so two people pressing the button
+    at the same moment cannot both win: the second finds `assignee_username`
+    already set and gets False.
+    """
+    now = _now()
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """UPDATE cases
+               SET assignee_username = ?, assignee_name = ?, assigned_at = ?, updated_at = ?
+               WHERE id = ? AND assignee_username IS NULL AND status != 'closed'""",
+            (username, name, now, now, case_id),
+        )
+    conn.close()
+    return cur.rowcount == 1
+
+
+def release_case(case_id: int, expected_username: str) -> bool:
+    """Clear the owner, but only if it is still `expected_username` — a page
+    that went stale while someone else re-claimed the case changes nothing."""
+    now = _now()
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """UPDATE cases
+               SET assignee_username = NULL, assignee_name = NULL, assigned_at = NULL,
+                   updated_at = ?
+               WHERE id = ? AND assignee_username = ? COLLATE NOCASE""",
+            (now, case_id, expected_username),
+        )
+    conn.close()
+    return cur.rowcount == 1
+
+
+def set_case_status_as_assignee(case_id: int, status: str, username: str, name: str) -> bool:
+    """Change a case's status on behalf of its owner.
+
+    The owner check lives in the WHERE clause, so it holds even when the
+    page that sent the request is out of date. Closing stamps `closed_by` /
+    `closed_at`; any other status clears them.
+    """
+    now = _now()
+    closed_by, closed_at = (name, now) if status == "closed" else (None, None)
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """UPDATE cases
+               SET status = ?, closed_by = ?, closed_at = ?, updated_at = ?
+               WHERE id = ? AND assignee_username = ? COLLATE NOCASE""",
+            (status, closed_by, closed_at, now, case_id, username),
+        )
+    conn.close()
+    return cur.rowcount == 1
+
+
 def latest_call_time_in_case(case_id: int) -> str | None:
     """Return ISO timestamp of the most recent call.created_at in this case.
 
@@ -1047,18 +1135,13 @@ def get_calls_by_case(case_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_all_cases(
-    limit: int | None = None,
-    offset: int = 0,
-    status: str | None = None,
-    search: str | None = None,
-) -> list[dict]:
-    """Return cases newest-first.
-
-    Default behavior (no kwargs) is unchanged — returns every case. Optional
-    `limit`, `status`, and `search` let the dashboard stay responsive when the
-    cases table grows large (search matches subject, customer name, or phone).
-    """
+def _case_filters(
+    status: str | None,
+    search: str | None,
+    assignee: str | None,
+    unassigned: bool,
+) -> tuple[str, list]:
+    """WHERE clause shared by `get_all_cases` and `count_cases`."""
     where: list[str] = []
     params: list = []
     if status:
@@ -1068,10 +1151,35 @@ def get_all_cases(
         like = f"%{search.strip()}%"
         where.append(
             "(cs.subject LIKE ? OR c.first_name LIKE ? OR "
-            "c.last_name LIKE ? OR c.phone LIKE ?)"
+            "c.last_name LIKE ? OR c.phone LIKE ? OR cs.assignee_name LIKE ?)"
         )
-        params.extend([like, like, like, like])
+        params.extend([like, like, like, like, like])
+    if assignee:
+        where.append("cs.assignee_username = ? COLLATE NOCASE")
+        params.append(assignee)
+    if unassigned:
+        where.append("cs.assignee_username IS NULL")
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    return where_sql, params
+
+
+def get_all_cases(
+    limit: int | None = None,
+    offset: int = 0,
+    status: str | None = None,
+    search: str | None = None,
+    assignee: str | None = None,
+    unassigned: bool = False,
+) -> list[dict]:
+    """Return cases newest-first.
+
+    Default behavior (no kwargs) is unchanged — returns every case. Optional
+    `limit`, `status`, and `search` let the dashboard stay responsive when the
+    cases table grows large (search matches subject, customer name, phone or
+    assignee). `assignee` keeps one person's cases; `unassigned` keeps the
+    ones nobody has claimed yet.
+    """
+    where_sql, params = _case_filters(status, search, assignee, unassigned)
 
     sql = f"""
         SELECT cs.*,
@@ -1094,21 +1202,14 @@ def get_all_cases(
     return [dict(r) for r in rows]
 
 
-def count_cases(status: str | None = None, search: str | None = None) -> int:
+def count_cases(
+    status: str | None = None,
+    search: str | None = None,
+    assignee: str | None = None,
+    unassigned: bool = False,
+) -> int:
     """Return number of cases matching optional status/search filters."""
-    where: list[str] = []
-    params: list = []
-    if status:
-        where.append("cs.status = ?")
-        params.append(status)
-    if search:
-        like = f"%{search.strip()}%"
-        where.append(
-            "(cs.subject LIKE ? OR c.first_name LIKE ? OR "
-            "c.last_name LIKE ? OR c.phone LIKE ?)"
-        )
-        params.extend([like, like, like, like])
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    where_sql, params = _case_filters(status, search, assignee, unassigned)
 
     conn = get_connection()
     n = conn.execute(
@@ -1138,16 +1239,23 @@ def get_calls_by_customer(customer_id: int) -> list[dict]:
 
 
 def get_case_counts() -> dict:
-    """Return counts of cases by status: {'open': n, 'follow_up': n, 'closed': n, 'total': n}."""
+    """Return counts of cases by status: {'open': n, 'follow_up': n, 'closed': n, 'total': n}.
+
+    `unassigned` counts the not-yet-closed cases nobody has claimed.
+    """
     conn = get_connection()
     rows = conn.execute(
         "SELECT status, COUNT(*) AS n FROM cases GROUP BY status"
     ).fetchall()
+    unassigned = conn.execute(
+        "SELECT COUNT(*) FROM cases WHERE status != 'closed' AND assignee_username IS NULL"
+    ).fetchone()[0]
     conn.close()
     counts = {r["status"]: r["n"] for r in rows}
     counts["total"] = sum(counts.values())
     for s in ("open", "follow_up", "closed"):
         counts.setdefault(s, 0)
+    counts["unassigned"] = unassigned
     return counts
 
 

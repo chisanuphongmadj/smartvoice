@@ -25,6 +25,8 @@ RESTORE = "restore"
 LOGIN = "login"
 LOGIN_FAILED = "login_failed"
 LOGOUT = "logout"
+CLAIM = "claim"            # a staff member takes ownership of a case
+RELEASE = "release"        # a case's owner is cleared (by them or a supervisor)
 
 # ── Entities ─────────────────────────────────────────────────────────────
 ENTITY_CUSTOMER = "customer"
@@ -43,6 +45,8 @@ ACTION_LABELS_TH = {
     LOGIN: "เข้าสู่ระบบ",
     LOGIN_FAILED: "เข้าสู่ระบบไม่สำเร็จ",
     LOGOUT: "ออกจากระบบ",
+    CLAIM: "รับเคส",
+    RELEASE: "คืนเคส",
 }
 
 ENTITY_LABELS_TH = {
@@ -56,7 +60,11 @@ ENTITY_LABELS_TH = {
 }
 
 # Never write these into the log, whatever the caller passes.
-_SECRET_FIELDS = {"password", "password_hash", "confirm", "hf_token", "token"}
+_SECRET_FIELDS = {
+    "password", "password_hash", "confirm", "hf_token", "token",
+    # Anyone holding the webhook URL can post into the team's channel.
+    "discord_webhook_url",
+}
 
 
 def redact(changes: dict | None) -> dict | None:

@@ -98,6 +98,11 @@ erDiagram
         INTEGER customer_id FK
         TEXT subject
         TEXT status
+        TEXT assignee_username
+        TEXT assignee_name
+        TEXT assigned_at
+        TEXT closed_by
+        TEXT closed_at
         TEXT created_at
         TEXT updated_at
     }
@@ -245,7 +250,14 @@ erDiagram
 | `customer_id` | FK → `customers.id` |
 | `subject` | หัวข้อเคส |
 | `status` | `open` / `follow_up` / `closed` |
+| `assignee_username` | username ของพนักงานที่กด "รับเคส" — NULL = ยังไม่มีคนรับ (เทียบแบบไม่สนตัวพิมพ์เล็ก/ใหญ่) |
+| `assignee_name` | ชื่อที่แสดงของผู้รับเคส ณ เวลาที่รับ |
+| `assigned_at` | เวลาที่รับเคส (UTC) |
+| `closed_by`, `closed_at` | ใครปิดเคสและเมื่อไร — ล้างเป็น NULL เมื่อเปิดเคสอีกครั้ง |
 | `created_at`, `updated_at` | เวลา lifecycle ของเคส |
+
+> รับเคสด้วย `db.claim_case()` ซึ่งเป็น `UPDATE ... WHERE assignee_username IS NULL` คำสั่งเดียว — สองคนกดพร้อมกันได้เคสแค่คนเดียว
+> เปลี่ยนสถานะผ่าน `db.set_case_status_as_assignee()` ที่ตรวจเจ้าของใน `WHERE` เช่นกัน กติกาทั้งหมดอยู่ที่ `smartvoice/case_workflow.py`
 
 ### `users`
 
@@ -295,6 +307,9 @@ erDiagram
 - `uploaded_by`
 - `uploaded_by_role`
 - `topic_detail`
+
+`_migrate_case_assignment()` เติม `assignee_username`, `assignee_name`, `assigned_at`, `closed_by`,
+`closed_at` ให้ `cases` (เคสเดิมทั้งหมดจึงเป็น "ยังไม่มีคนรับ")
 
 `_migrate_soft_delete()` ทำแบบเดียวกันกับ `customers` (`deleted_at`, `deleted_by`) และ
 `warranty_registrations` (`deleted_at`, `deleted_by`, `hidden_with_customer`) ส่วน `users` และ `audit_log`
