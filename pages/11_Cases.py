@@ -1,7 +1,8 @@
 """จัดการเคส — case list, claim / close, and the calls inside each case.
 
-Reads cases straight from SQL (filters + paging in the query), so unlike the
-Dashboard pages it doesn't load any calls up front.
+Reads cases straight from SQL (filters + paging in the query), then the calls
+of just the cases on screen — enough to say what each case is about
+(`case_workflow.case_brief`) without loading the whole calls table.
 """
 
 import math
@@ -11,14 +12,18 @@ import streamlit as st
 
 st.set_page_config(page_title="SmartVoice — จัดการเคส", layout="wide")
 
-from smartvoice import db
+from smartvoice import case_workflow, db, labels
 from smartvoice.auth import PAGE_CASES
+from smartvoice.customer_entry import compute_expiry_date
 from smartvoice.dashboard_common import inject_dashboard_css
 from smartvoice.ui_helpers import (
+    TABLE_CLICK_MODES,
     current_case_actor,
     init_page,
     metric_card,
+    picked_row,
     render_case_ownership,
+    sentiment_emoji,
 )
 
 init_page(PAGE_CASES)
@@ -26,24 +31,96 @@ inject_dashboard_css()
 
 st.title("จัดการเคส")
 st.caption(
-    "คลิกแถวในตารางเพื่อเปิดเคส แล้วกด **รับเคสนี้** — เคสที่มีคนรับแล้ว คนอื่นรับซ้ำไม่ได้ "
-    "และเปลี่ยนสถานะ/ปิดเคสได้เฉพาะผู้รับเคส (ทุกการรับ/ปิดเคสแจ้งเข้า Discord)"
+    "คลิกที่เคสไหนก็ได้ในตาราง เพื่อเปิดอ่านรายละเอียดเต็ม แล้วกด **รับเคสนี้** ในหน้าต่างนั้น "
+    "— เคสที่มีคนรับแล้ว คนอื่นรับซ้ำไม่ได้ และเปลี่ยนสถานะ/ปิดเคสได้เฉพาะผู้รับเคส "
+    "(ทุกการรับ/ปิดเคสแจ้งเข้า Discord)"
 )
+
+
+@st.dialog("รายละเอียดเคส", width="large")
+def _case_dialog(case_id: int) -> None:
+    """Everything about one case, then the claim / status buttons."""
+    picked = db.get_case_detail(case_id)
+    if not picked:
+        st.warning("ไม่พบเคสนี้แล้ว — อาจถูกรวมเข้ากับเคสอื่น")
+        return
+    picked_calls = db.get_calls_for_cases([case_id]).get(case_id, [])
+    brief = case_workflow.case_brief(picked_calls)
+    picked_customer = (
+        f"{picked.get('first_name') or ''} {picked.get('last_name') or ''}".strip() or "—"
+    )
+    st.markdown(f"#### เคส #{picked['id']}: {brief['issue'] or picked['subject']}")
+    st.caption(
+        f"ความเร่งด่วน: {brief['priority']}  •  "
+        f"ลูกค้า: {picked_customer} ({picked.get('phone') or '-'})  •  "
+        f"สถานะ: {labels.case_status(picked['status'])}  •  "
+        f"{picked.get('call_count') or 0} สาย"
+    )
+
+    for anomaly in brief["anomalies"]:
+        sev = case_workflow.SEVERITY_LABELS_TH.get(anomaly["severity"], "ไม่ระบุ")
+        (st.error if anomaly["severity"] == "high" else st.warning)(
+            f"ความผิดปกติ ({sev}): {anomaly['reason'] or 'ไม่ระบุสาเหตุ'}"
+        )
+
+    info_col, todo_col = st.columns(2)
+    with info_col:
+        st.markdown("**ลูกค้าแจ้งว่า** (จากสายล่าสุด)")
+        st.write(brief["summary"] or "ยังไม่มีสรุป — สายอาจยังประมวลผลไม่เสร็จ")
+    with todo_col:
+        st.markdown("**สิ่งที่ต้องทำต่อ**")
+        if brief["next_action_steps"]:
+            st.markdown("\n".join(f"- {step}" for step in brief["next_action_steps"]))
+            if brief["next_action_owner"]:
+                st.caption(f"ผู้รับผิดชอบที่ระบบแนะนำ: {brief['next_action_owner']}")
+        else:
+            st.write("ระบบไม่ได้ระบุ — ดูจากบทสรุปและสายในเคส")
+
+    if picked.get("customer_id"):
+        warranties = db.get_warranties_by_customer(picked["customer_id"])
+        if warranties:
+            st.markdown("**สินค้า / ประกันของลูกค้า**")
+            for w in warranties:
+                product = " ".join(
+                    str(w.get(k)) for k in ("brand", "model", "size") if w.get(k)
+                ) or "ไม่ระบุสินค้า"
+                # Older rows were imported without an expiry date —
+                # derive it the same way the data-entry page does.
+                expiry = w.get("expiry_date") or compute_expiry_date(
+                    w.get("date_of_purchase"), w.get("warranty_period_months")
+                )
+                st.caption(
+                    f"{product}  •  ทะเบียน {w.get('registration_no') or '-'}  •  "
+                    f"ซื้อ {labels.thai_time(w.get('date_of_purchase'), with_time=False)}  •  "
+                    f"หมดประกัน {labels.thai_time(expiry, with_time=False)}"
+                )
+
+    st.divider()
+    render_case_ownership(picked, key_suffix="dlg")
+
+    with st.expander(f"สายในเคสนี้ ({len(picked_calls)})"):
+        for pc in reversed(picked_calls):
+            st.markdown(
+                f"**{pc['filename']}** — {pc.get('topic') or '-'} "
+                f"({sentiment_emoji(pc.get('sentiment'))})"
+            )
+            if pc.get("summary"):
+                st.write(pc["summary"])
 
 case_counts = db.get_case_counts()
 case_actor = current_case_actor()
 
 cs_col1, cs_col2, cs_col3, cs_col4, cs_col5 = st.columns(5)
 with cs_col1:
-    st.markdown(metric_card(case_counts["total"], "Total Cases"), unsafe_allow_html=True)
+    st.markdown(metric_card(case_counts["total"], "เคสทั้งหมด"), unsafe_allow_html=True)
 with cs_col2:
     st.markdown(metric_card(case_counts["unassigned"], "ยังไม่มีคนรับ", "#a78bfa"), unsafe_allow_html=True)
 with cs_col3:
-    st.markdown(metric_card(case_counts["open"], "เปิด (Open)", "#22c55e"), unsafe_allow_html=True)
+    st.markdown(metric_card(case_counts["open"], "เปิด", "#22c55e"), unsafe_allow_html=True)
 with cs_col4:
-    st.markdown(metric_card(case_counts["follow_up"], "ติดตาม (Follow-up)", "#eab308"), unsafe_allow_html=True)
+    st.markdown(metric_card(case_counts["follow_up"], "ติดตาม", "#eab308"), unsafe_allow_html=True)
 with cs_col5:
-    st.markdown(metric_card(case_counts["closed"], "ปิด (Closed)", "#ef4444"), unsafe_allow_html=True)
+    st.markdown(metric_card(case_counts["closed"], "ปิดแล้ว", "#ef4444"), unsafe_allow_html=True)
 
 if case_counts["total"] > 0:
     st.markdown("<br>", unsafe_allow_html=True)
@@ -51,15 +128,24 @@ if case_counts["total"] > 0:
     # ── Filter row — push status/search down to SQL ─────────────────────
     _STATUS_OPTIONS = {
         "ทั้งหมด": None,
-        "เปิด (Open)": "open",
-        "ติดตาม (Follow-up)": "follow_up",
-        "ปิด (Closed)": "closed",
+        "เปิด": "open",
+        "ติดตาม": "follow_up",
+        "ปิดแล้ว": "closed",
     }
     _OWNER_OPTIONS = ("ทั้งหมด", "เคสของฉัน", "ยังไม่มีคนรับ")
+    # Shortcuts on the home page arrive with ?owner=mine / ?owner=unassigned.
+    # Apply once, then drop it so the dropdown stays in the user's hands.
+    _owner_param = {"mine": "เคสของฉัน", "unassigned": "ยังไม่มีคนรับ"}.get(
+        st.query_params.get("owner", "")
+    )
+    if _owner_param:
+        st.session_state["case_owner_filter"] = _owner_param
+        st.session_state["case_page"] = 1
+        del st.query_params["owner"]
     cf_status_col, cf_owner_col, cf_search_col, cf_size_col = st.columns([1.1, 1.1, 2, 0.9])
     with cf_status_col:
         cs_status_label = st.selectbox(
-            "Status",
+            "สถานะเคส",
             list(_STATUS_OPTIONS.keys()),
             key="case_status_filter",
         )
@@ -71,7 +157,7 @@ if case_counts["total"] > 0:
         )
     with cf_search_col:
         cs_search = st.text_input(
-            "ค้นหา (Subject / ชื่อลูกค้า / เบอร์ / ผู้รับเคส)",
+            "ค้นหา (หัวข้อ / ชื่อลูกค้า / เบอร์ / ผู้รับเคส)",
             key="case_search",
             placeholder="เช่น แจ้งปัญหา, สุภาพร, 0819999336",
         )
@@ -111,7 +197,7 @@ if case_counts["total"] > 0:
         if cs_total_filtered == 0:
             st.markdown(
                 "<div style='padding-top:1.95rem;color:#fbbf24;font-size:0.95rem;font-weight:500'>"
-                "ไม่พบเคสที่ตรงกับเงื่อนไข — ลองล้าง search หรือเปลี่ยน Status</div>",
+                "ไม่พบเคสที่ตรงกับเงื่อนไข — ลองล้างคำค้น หรือเปลี่ยนสถานะเคส / ผู้รับเคส</div>",
                 unsafe_allow_html=True,
             )
         else:
@@ -132,60 +218,75 @@ if case_counts["total"] > 0:
     )
 
     if all_cases:
+        _case_badge = labels.CASE_STATUS_TH
+        # One query for the calls behind every case on this page — that is
+        # where "what is this case about" lives (summary, next step, urgency).
+        calls_by_case = db.get_calls_for_cases([cs["id"] for cs in all_cases])
+        briefs = {
+            cs["id"]: case_workflow.case_brief(calls_by_case.get(cs["id"], []))
+            for cs in all_cases
+        }
+
         case_rows = []
-        _case_badge = {"open": "เปิด", "follow_up": "ติดตาม", "closed": "ปิด"}
         for cs in all_cases:
+            brief = briefs[cs["id"]]
             customer_name = (
-                f"{cs.get('first_name', '')} {cs.get('last_name', '')}".strip() or "—"
+                f"{cs.get('first_name') or ''} {cs.get('last_name') or ''}".strip() or "—"
             )
             case_rows.append({
                 "Case ID": cs["id"],
-                "Subject": cs["subject"],
-                "Customer": customer_name,
-                "Phone": cs.get("phone") or "—",
-                "Calls": cs.get("call_count", 0),
-                "Status": _case_badge.get(cs["status"], cs["status"]),
+                "ความเร่งด่วน": brief["priority"],
+                "เรื่อง": brief["issue"] or cs["subject"],
+                "ลูกค้าแจ้งว่า": brief["summary"] or "—",
+                "สิ่งที่ต้องทำต่อ": brief["next_action"] or "—",
+                "ลูกค้า": f"{customer_name} ({cs.get('phone') or '-'})",
+                "สาย": cs.get("call_count", 0),
+                "สถานะ": _case_badge.get(cs["status"], cs["status"]),
                 "ผู้รับเคส": cs.get("assignee_name") or "ยังไม่มีคนรับ",
-                "Updated": cs.get("updated_at", "")[:10],
+                "อัปเดต": labels.thai_time(cs.get("updated_at")),
             })
         cases_df = pd.DataFrame(case_rows)
+        # Claiming / closing a case bumps it to the top of the list. A selection
+        # is a row *position*, so it would then point at a different case —
+        # tie the table's identity to the row order to clear it when that moves.
+        _row_order = abs(hash(tuple(cs["id"] for cs in all_cases))) % 10**8
         case_table = st.dataframe(
             cases_df,
             width="stretch",
             hide_index=True,
             on_select="rerun",
-            selection_mode="single-row",
-            key="case_table",
+            selection_mode=TABLE_CLICK_MODES,
+            key=f"case_table_{cs_page}_{_row_order}",
             column_config={
-                "Subject": st.column_config.TextColumn(width="large"),
-                "Customer": st.column_config.TextColumn(width="medium"),
+                "Case ID": st.column_config.NumberColumn(width="small"),
+                "ความเร่งด่วน": st.column_config.TextColumn(width="small"),
+                "เรื่อง": st.column_config.TextColumn(width="medium"),
+                "ลูกค้าแจ้งว่า": st.column_config.TextColumn(width="large"),
+                "สิ่งที่ต้องทำต่อ": st.column_config.TextColumn(width="large"),
+                "ลูกค้า": st.column_config.TextColumn(width="medium"),
+                "สาย": st.column_config.NumberColumn(width="small"),
                 "ผู้รับเคส": st.column_config.TextColumn(width="medium"),
             },
         )
 
-        # ── Selected case: owner + claim / status / release ────────────
-        picked_rows = [i for i in case_table.selection.rows if i < len(all_cases)]
-        if not picked_rows:
-            st.caption("คลิกแถวในตารางเพื่อรับเคส ปิดเคส หรือดูสายในเคส")
+        # ── Click a case → its details open in a dialog ─────────────────
+        row, is_new = picked_row(case_table, "_case_dialog_seen")
+        opened_id = st.session_state.get("_case_dialog_case")
+        if opened_id and f"_case_flash_{opened_id}" in st.session_state:
+            # A claim/close inside the dialog reruns the page: open the SAME case
+            # again (by id, not row) so the person sees the result message.
+            _case_dialog(opened_id)
+        elif row is not None and row < len(all_cases):
+            picked_id = all_cases[row]["id"]
+            if is_new:
+                st.session_state["_case_dialog_case"] = picked_id
+                _case_dialog(picked_id)
         else:
-            picked = db.get_case_detail(all_cases[picked_rows[0]]["id"])
-            if picked:
-                with st.container(border=True):
-                    picked_customer = (
-                        f"{picked.get('first_name') or ''} {picked.get('last_name') or ''}".strip() or "—"
-                    )
-                    st.markdown(f"#### เคส #{picked['id']}: {picked['subject']}")
-                    st.caption(
-                        f"ลูกค้า: {picked_customer} ({picked.get('phone') or '-'})  •  "
-                        f"สถานะ: {_case_badge.get(picked['status'], picked['status'])}  •  "
-                        f"{picked.get('call_count') or 0} สาย"
-                    )
-                    render_case_ownership(picked, key_suffix="dash")
-                    picked_calls = db.get_calls_by_case(picked["id"])
-                    with st.expander(f"สายในเคสนี้ ({len(picked_calls)})"):
-                        for pc in picked_calls:
-                            st.markdown(f"**{pc['filename']}** — {pc.get('topic') or '-'}")
-                            if pc.get("summary"):
-                                st.write(pc["summary"])
+            st.info("คลิกที่เคสไหนก็ได้ในตาราง เพื่อเปิดอ่านรายละเอียดและรับเคส")
+        if opened_id or (row is not None and row < len(all_cases)):
+            reopen_id = all_cases[row]["id"] if row is not None and row < len(all_cases) else opened_id
+            if st.button(f"เปิดรายละเอียดเคส #{reopen_id} อีกครั้ง", icon=":material/open_in_new:"):
+                st.session_state["_case_dialog_case"] = reopen_id
+                _case_dialog(reopen_id)
 else:
     st.caption("ยังไม่มีเคสในระบบ — เคสจะถูกสร้างอัตโนมัติหลัง process สาย")

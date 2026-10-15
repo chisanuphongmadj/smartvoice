@@ -10,9 +10,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Dashboard", layout="wide")
+st.set_page_config(page_title="SmartVoice — ภาพรวม", layout="wide")
 
-from smartvoice import db
+from smartvoice import db, labels
 from smartvoice.auth import PAGE_DASHBOARD
 from smartvoice.dashboard_common import (
     BAR_CORNER,
@@ -41,10 +41,10 @@ done_calls = df.to_dict("records")
 total = len(df)
 col1, col2, col3, col4 = st.columns(4)
 for col, val, label in [
-    (col1, total, "Total Calls"),
-    (col2, (df["sentiment"] == "positive").sum(), "Positive"),
-    (col3, (df["sentiment"] == "neutral").sum(), "Neutral"),
-    (col4, (df["sentiment"] == "negative").sum(), "Negative"),
+    (col1, total, "สายทั้งหมด"),
+    (col2, (df["sentiment"] == "positive").sum(), "ลูกค้าเชิงบวก"),
+    (col3, (df["sentiment"] == "neutral").sum(), "ลูกค้าเป็นกลาง"),
+    (col4, (df["sentiment"] == "negative").sum(), "ลูกค้าเชิงลบ"),
 ]:
     with col:
         st.markdown(metric_card(val, label), unsafe_allow_html=True)
@@ -52,16 +52,22 @@ for col, val, label in [
 # ── Shortcuts to the pages that need someone to act ─────────────────────
 anomaly_count = int(df["anomaly_detected"].fillna(0).astype(bool).sum())
 unassigned_cases = db.get_case_counts()["unassigned"]
+st.markdown("<div style='height:0.6rem'></div>", unsafe_allow_html=True)
 link_col1, link_col2 = st.columns(2)
 with link_col1:
     st.page_link(
         "pages/9_Dashboard_Anomaly.py",
-        label=f"สายผิดปกติ {anomaly_count:,} สาย",
+        label=f"ดูสายผิดปกติ ({anomaly_count:,} สาย)",
+        icon=":material/warning:",
+        width="stretch",
     )
 with link_col2:
     st.page_link(
         "pages/11_Cases.py",
-        label=f"เคสรอคนรับ {unassigned_cases:,} เคส",
+        label=f"ไปรับเคสที่รออยู่ ({unassigned_cases:,} เคส)",
+        icon=":material/assignment:",
+        query_params={"owner": "unassigned"},
+        width="stretch",
     )
 
 st.divider()
@@ -70,11 +76,12 @@ st.divider()
 chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
-    st.subheader("Sentiment Distribution")
+    st.subheader("อารมณ์ลูกค้า")
     sentiment_counts = df["sentiment"].value_counts().reset_index()
     sentiment_counts.columns = ["Sentiment", "Count"]
+    sentiment_counts["Label"] = sentiment_counts["Sentiment"].map(labels.sentiment)
     fig_sentiment = px.bar(
-        sentiment_counts, x="Sentiment", y="Count",
+        sentiment_counts, x="Label", y="Count",
         color="Sentiment", color_discrete_map=SENTIMENT_COLORS, text="Count",
     )
     fig_sentiment.update_traces(
@@ -86,13 +93,16 @@ with chart_col1:
     fig_sentiment.update_layout(
         **CHART_LAYOUT, xaxis_title="", yaxis_title="จำนวนสาย",
         margin=dict(t=30, b=10),
-        yaxis=dict(gridcolor=GRID_COLOR, zeroline=False),
+        yaxis=dict(
+            gridcolor=GRID_COLOR, zeroline=False,
+            dtick=1 if sentiment_counts["Count"].max() <= 10 else None,
+        ),
         xaxis=dict(showgrid=False),
     )
     st.plotly_chart(fig_sentiment, width="stretch")
 
 with chart_col2:
-    st.subheader("Topic / Intent Distribution")
+    st.subheader("ลูกค้าโทรมาเรื่องอะไร")
     topic_counts = df["topic"].replace("", pd.NA).dropna().value_counts().reset_index()
     topic_counts.columns = ["Topic", "Count"]
     st.plotly_chart(
@@ -124,7 +134,7 @@ with chart_col2:
 st.divider()
 
 # ── Top Issues ───────────────────────────────────────────────────────────
-st.subheader("Top 3 Issues")
+st.subheader("3 เรื่องที่มีปัญหามากที่สุด")
 issue_calls = [c for c in done_calls if c.get("sentiment") == "negative" or c.get("anomaly_detected")]
 if issue_calls:
     issue_topic_counts = Counter(c["topic"] for c in issue_calls if c.get("topic")).most_common(3)
@@ -134,8 +144,8 @@ if issue_calls:
             hbar(issue_df, "Issue / Topic", SCALE_RED, height=max(200, 60 + 50 * len(issue_df))),
             width="stretch",
         )
-        st.caption(f"จาก {len(issue_calls)} สาย (Negative sentiment + Anomaly)")
+        st.caption(f"นับจาก {len(issue_calls)} สายที่ลูกค้าไม่พอใจหรือผิดปกติ")
     else:
-        st.caption("ไม่พบ topic ใน calls ที่มีปัญหา")
+        st.caption("สายที่มีปัญหายังไม่มีหัวข้อ")
 else:
-    st.success("ไม่พบสายที่มีปัญหา (Negative/Anomaly) ในช่วงเวลาที่เลือก")
+    st.success("ไม่พบสายที่ลูกค้าไม่พอใจหรือผิดปกติในช่วงเวลาที่เลือก")

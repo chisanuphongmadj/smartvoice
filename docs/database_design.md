@@ -164,7 +164,7 @@ erDiagram
 | `summary` | TEXT | สรุป LLM |
 | `sentiment` | TEXT | `positive` / `neutral` / `negative` |
 | `topic` | TEXT | หัวข้อหลัก |
-| `topic_detail` | TEXT | ประเภทความเสียหายเฉพาะ — กรอกเมื่อ `topic="แจ้งปัญหาสินค้า"` เท่านั้น (ค่าใน vocabulary: `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ`) — call เก่าก่อน 2026-05-26 จะเป็น NULL |
+| `topic_detail` | TEXT | ประเภทความเสียหายเฉพาะ — กรอกเมื่อ `topic="แจ้งปัญหาสินค้า"` เท่านั้น (ค่าใน vocabulary: `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `กลิ่น/แพ้/ระคายเคือง`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ`) — call เก่าก่อน 2026-05-26 จะเป็น NULL |
 | `speaker_mapping` | TEXT JSON | mapping speaker |
 | `agent_performance` | TEXT JSON | คะแนน QA + evidence + next action |
 | `keywords` | TEXT JSON | issue keywords |

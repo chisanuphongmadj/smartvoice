@@ -3,10 +3,10 @@
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Users", layout="wide")
+st.set_page_config(page_title="SmartVoice — จัดการผู้ใช้", layout="wide")
 
 from smartvoice import audit as audit_trail
-from smartvoice import db
+from smartvoice import db, labels
 from smartvoice.auth import (
     PAGE_LABELS_TH,
     PAGE_USERS,
@@ -25,7 +25,7 @@ current_user, current_role = init_page(PAGE_USERS)
 
 st.title("จัดการผู้ใช้")
 st.caption(
-    "เพิ่มบัญชี / แก้ไขบทบาท / เปิด-ปิดใช้งาน / ลบบัญชี — "
+    "เพิ่มบัญชีพนักงาน / แก้ไขบทบาท / เปิด-ปิดใช้งาน — "
     "รหัสผ่านเป็นของเจ้าของบัญชีเท่านั้น ผู้ดูแลระบบตั้งหรือรีเซ็ตให้ไม่ได้"
 )
 
@@ -42,12 +42,12 @@ else:
         pd.DataFrame(
             [
                 {
-                    "Username": u["username"],
+                    "ชื่อผู้ใช้ (Username)": u["username"],
                     "ชื่อที่แสดง": u["display_name"],
                     "บทบาท": role_label(u["role"]),
                     "สถานะ": "ใช้งาน" if u["is_active"] else "ปิดใช้งาน",
-                    "เข้าระบบล่าสุด": (u["last_login_at"] or "—")[:19].replace("T", " "),
-                    "สร้างเมื่อ": u["created_at"][:19].replace("T", " "),
+                    "เข้าระบบล่าสุด": labels.thai_time(u["last_login_at"], empty="ยังไม่เคยเข้า"),
+                    "สร้างเมื่อ": labels.thai_time(u["created_at"]),
                 }
                 for u in users
             ]
@@ -64,7 +64,10 @@ st.subheader("เพิ่มผู้ใช้ใหม่")
 with st.form("_add_user_form"):
     c1, c2 = st.columns(2)
     with c1:
-        new_username = st.text_input("Username", placeholder="เช่น somchai.p")
+        new_username = st.text_input(
+            "ชื่อผู้ใช้ (Username)", placeholder="เช่น somchai.p",
+            help="ใช้ตอนเข้าสู่ระบบ — ภาษาอังกฤษ ตัวเลข . _ - อย่างน้อย 3 ตัว",
+        )
         new_display = st.text_input("ชื่อที่แสดง", placeholder="เช่น สมชาย ประเสริฐ")
     with c2:
         new_role = st.selectbox(
@@ -73,7 +76,7 @@ with st.form("_add_user_form"):
             index=ROLES.index("Agent"),
             format_func=lambda r: f"{r} ({ROLE_LABELS_TH[r]})",
         )
-        new_password = st.text_input("รหัสผ่าน", type="password")
+        new_password = st.text_input("รหัสผ่านเริ่มต้น", type="password", help="อย่างน้อย 8 ตัวอักษร — แจ้งพนักงานให้เปลี่ยนเองหลังเข้าใช้ครั้งแรก")
         new_confirm = st.text_input("ยืนยันรหัสผ่าน", type="password")
 
     st.caption(

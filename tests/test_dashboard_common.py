@@ -47,3 +47,13 @@ def test_count_list_field_skips_bad_json_and_blank_items():
 def test_hbar_leaves_room_for_the_value_label():
     fig = dc.hbar(pd.DataFrame({"Topic": ["a", "b"], "Count": [4, 2]}), "Topic", dc.SCALE_BRAND)
     assert fig.layout.xaxis.range == (0, 5.0)
+
+
+def test_old_brand_spellings_are_one_bar_and_counted_once_per_call():
+    calls = [
+        {"brand_mentions": '["Lotus/โลตัส", "Restonic"]'},
+        {"brand_mentions": '["โลตัส", "Lotus"]'},
+        {"platform_mentions": '["ช็อปปี้", "โทรศัพท์"]'},
+    ]
+    assert dict(dc.count_list_field(calls, "brand_mentions")) == {"Lotus (โลตัส)": 2, "Restonic": 1}
+    assert dc.count_list_field(calls, "platform_mentions") == [("Shopee", 1)]

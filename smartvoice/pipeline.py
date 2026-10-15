@@ -1319,7 +1319,10 @@ def _auto_assign_case(call_id: int, analysis: dict) -> None:
                     return
 
         # (2) LLM matching — for cases older than the recency window
-        result = ollama_client.match_case(new_topic, new_summary, open_cases)
+        result = ollama_client.match_case(
+            new_topic, new_summary, open_cases,
+            new_call_at=call_dt.isoformat() if call_dt else None,
+        )
         matched_id = result.get("match_case_id")
         valid_ids = {cs["id"] for cs in open_cases}
         if matched_id and matched_id in valid_ids:

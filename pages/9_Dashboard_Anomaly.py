@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — ความผิดปกติ", layout="wide")
+st.set_page_config(page_title="SmartVoice — สายที่ผิดปกติ", layout="wide")
 
 from smartvoice.auth import PAGE_ANOMALY
 from smartvoice.dashboard_common import inject_dashboard_css, load_filtered_calls
@@ -11,7 +11,7 @@ from smartvoice.ui_helpers import init_page, metric_card
 init_page(PAGE_ANOMALY)
 inject_dashboard_css()
 
-st.title("Dashboard — ความผิดปกติ")
+st.title("Dashboard — สายที่ผิดปกติ")
 st.caption(
     "สายที่ควรส่งต่อหัวหน้า เช่น ขู่ฟ้อง ขู่ร้องเรียน ขอคุยหัวหน้า คำหยาบ หรือพนักงานทำผิด "
     "— ลูกค้าไม่พอใจแต่จบเรื่องได้ ไม่นับเป็นความผิดปกติ"

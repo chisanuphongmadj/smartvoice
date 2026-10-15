@@ -93,6 +93,19 @@ def save_audio_file(file_bytes: bytes, filename: str, file_hash: str = "") -> st
 _THAI_PHONE_RE = re.compile(r"(?<![\d])0\d{9}(?![\d])")
 
 
+def remove_audio_file(path: str | None) -> bool:
+    """Delete a stored audio file. Returns False when it exists but can't be
+    removed (e.g. open in a media player on Windows) — never raises, so one
+    locked file can't stop a bulk delete halfway."""
+    if not path or not os.path.exists(path):
+        return True
+    try:
+        os.remove(path)
+    except OSError:
+        return False
+    return True
+
+
 def extract_phone_from_filename(filename: str) -> str | None:
     """Extract a Thai phone number (10 digits starting with 0) from a filename.
 
@@ -148,3 +161,19 @@ def extract_agent_code_from_filename(filename: str) -> str | None:
         if 2 <= len(seg) <= 5:
             return seg
     return None
+
+
+def extract_call_time_from_filename(filename: str) -> datetime | None:
+    """When the call actually happened, from the CDR filename's leading
+    YYYYMMDDHHMMSS (the phone system's local time).
+
+    `calls.created_at` is the upload time, not the call time — this is the
+    one to show staff. None when the name has no valid timestamp.
+    """
+    match = re.match(r"(\d{14})", os.path.basename(filename or ""))
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None

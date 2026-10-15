@@ -31,7 +31,7 @@ _HOVER_TIMES = "พบ: %{x} ครั้ง"
 kw_col, brand_col = st.columns(2)
 
 with kw_col:
-    st.subheader("หัวข้อปัญหา (Issue Keywords)")
+    st.subheader("คำที่ลูกค้าพูดถึงบ่อย")
     kw_counts = count_list_field(done_calls, "keywords")
     if kw_counts:
         kw_df = pd.DataFrame(kw_counts, columns=["Keyword", "Count"])
@@ -41,10 +41,10 @@ with kw_col:
             width="stretch",
         )
     else:
-        st.caption("ยังไม่มีข้อมูล keyword")
+        st.caption("ยังไม่มีคำสำคัญในสายที่เลือก")
 
 with brand_col:
-    st.subheader("Brand Mentions")
+    st.subheader("แบรนด์ที่ถูกพูดถึง")
     brand_counts = count_list_field(done_calls, "brand_mentions")
     if brand_counts:
         brand_df = pd.DataFrame(brand_counts, columns=["Brand", "Count"])
@@ -54,11 +54,11 @@ with brand_col:
             width="stretch",
         )
     else:
-        st.caption("ยังไม่มีข้อมูล brand mentions")
+        st.caption("ยังไม่มีการพูดถึงแบรนด์ในสายที่เลือก")
 
 st.divider()
 
-st.subheader("Platform / Channel Mentions")
+st.subheader("ช่องทางซื้อ / ติดต่อที่ถูกพูดถึง")
 plat_counts = count_list_field(done_calls, "platform_mentions")
 if plat_counts:
     plat_df = pd.DataFrame(plat_counts, columns=["Platform", "Count"])
@@ -68,4 +68,4 @@ if plat_counts:
         width="stretch",
     )
 else:
-    st.caption("ยังไม่มีข้อมูล platform mentions — re-process ไฟล์เสียงเพื่อดูผล")
+    st.caption("ยังไม่มีการพูดถึงช่องทางในสายที่เลือก")

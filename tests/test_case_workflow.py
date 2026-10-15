@@ -1,5 +1,6 @@
 """Case ownership: claim, release, status — and the Discord message it sends."""
 
+import json
 import sqlite3
 from unittest import mock
 
@@ -273,3 +274,72 @@ def test_post_reports_http_errors():
 def test_webhook_url_never_reaches_the_audit_log():
     redacted = audit.redact({"DISCORD_WEBHOOK_URL": "https://discord.com/api/webhooks/1/t"})
     assert redacted == {"DISCORD_WEBHOOK_URL": "***"}
+
+
+# ── Case brief (what a case is about, before claiming it) ───────────────
+
+def _call(**fields):
+    base = {
+        "filename": "x.wav", "summary": "", "topic": "แจ้งปัญหาสินค้า", "topic_detail": None,
+        "sentiment": "neutral", "anomaly_detected": 0, "anomaly_reason": "",
+        "anomaly_severity": "", "agent_performance": "", "transcript": "",
+    }
+    base.update(fields)
+    return base
+
+
+def test_brief_uses_the_latest_call_and_splits_the_next_action():
+    calls = [
+        _call(summary="เก่า", topic_detail="ผ้าขาด/ผ้าหุ้มชำรุด"),
+        _call(
+            summary="ลูกค้าขอคืนที่นอน",
+            topic="คืน/เปลี่ยน/Trade-in",
+            sentiment="negative",
+            transcript="Customer: ขอคืนเงินค่าที่นอนค่ะ\nAgent: รับเรื่องคืนเงินไว้ค่ะ",
+            agent_performance=json.dumps({
+                "next_action": "ส่งเรื่องให้ฝ่ายบัญชีคืนเงิน | [บริบท/รายละเอียด] | ภายใน 7 วัน",
+                "next_action_owner": "ฝ่ายบัญชี",
+            }, ensure_ascii=False),
+        ),
+    ]
+    brief = case_workflow.case_brief(calls)
+
+    assert brief["summary"] == "ลูกค้าขอคืนที่นอน"
+    # The specific problem type beats the broad topic, even from an older call.
+    assert brief["issue"] == "ผ้าขาด/ผ้าหุ้มชำรุด"
+    assert brief["next_action"] == "ส่งเรื่องให้ฝ่ายบัญชีคืนเงิน"
+    # The prompt's template placeholder never reaches the screen.
+    assert brief["next_action_steps"] == ["ส่งเรื่องให้ฝ่ายบัญชีคืนเงิน", "ภายใน 7 วัน"]
+    assert brief["next_action_owner"] == "ฝ่ายบัญชี"
+    assert brief["priority"] == case_workflow.PRIORITY_HIGH
+
+
+def test_brief_marks_a_high_severity_anomaly_as_most_urgent():
+    calls = [
+        _call(anomaly_detected=1, anomaly_severity="high", anomaly_reason="ลูกค้าขู่ฟ้อง"),
+        _call(sentiment="positive"),
+    ]
+    brief = case_workflow.case_brief(calls)
+    assert (brief["priority"], brief["priority_rank"]) == (case_workflow.PRIORITY_URGENT, 0)
+    assert brief["anomalies"][0]["reason"] == "ลูกค้าขู่ฟ้อง"
+
+
+def test_brief_of_a_calm_case_or_no_calls_is_normal():
+    assert case_workflow.case_brief([])["priority"] == case_workflow.PRIORITY_NORMAL
+    brief = case_workflow.case_brief([_call(agent_performance="not json")])
+    assert brief["priority"] == case_workflow.PRIORITY_NORMAL
+    assert brief["next_action"] == "" and brief["next_action_steps"] == []
+
+
+def test_calls_for_a_page_of_cases_come_back_in_one_grouped_query(case_id):
+    other = db.create_case(db.get_case_by_id(case_id)["customer_id"], "อีกเคส")
+    first = db.insert_call("a.wav", "hash-a", "data/a.wav")
+    second = db.insert_call("b.wav", "hash-b", "data/b.wav")
+    db.assign_call_to_case(first, case_id)
+    db.assign_call_to_case(second, case_id)
+
+    grouped = db.get_calls_for_cases([case_id, other])
+
+    assert [c["id"] for c in grouped[case_id]] == [first, second]
+    assert grouped[other] == []
+    assert db.get_calls_for_cases([]) == {}

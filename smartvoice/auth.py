@@ -93,16 +93,16 @@ DASHBOARD_PAGES = (
 
 PAGE_LABELS_TH = {
     PAGE_HOME: "หน้าแรก",
-    PAGE_ADMIN: "Admin — อัปโหลด/ประมวลผล",
+    PAGE_ADMIN: "อัปโหลดและประมวลผลเสียง",
     PAGE_DASHBOARD: "Dashboard — ภาพรวม",
     PAGE_INSIGHTS: "Dashboard — คีย์เวิร์ด แบรนด์ ช่องทาง",
-    PAGE_ANOMALY: "Dashboard — ความผิดปกติ",
-    PAGE_AGENT_PERFORMANCE: "Dashboard — ผลงาน Agent",
+    PAGE_ANOMALY: "Dashboard — สายที่ผิดปกติ",
+    PAGE_AGENT_PERFORMANCE: "Dashboard — ผลงานพนักงาน",
     PAGE_CALLS: "Dashboard — รายการสาย",
     PAGE_CASES: "จัดการเคส",
-    PAGE_CUSTOMERS: "ลูกค้า & การรับประกัน",
-    PAGE_DATA_ENTRY: "เพิ่มลูกค้า & ทะเบียนรับประกัน",
-    PAGE_AUDIT: "ประวัติการใช้งาน (Audit log)",
+    PAGE_CUSTOMERS: "ลูกค้าและการรับประกัน",
+    PAGE_DATA_ENTRY: "เพิ่ม/แก้ไขข้อมูลลูกค้า",
+    PAGE_AUDIT: "ประวัติการใช้งาน",
     PAGE_SETTINGS: "ตั้งค่าระบบ",
     PAGE_USERS: "จัดการผู้ใช้",
 }

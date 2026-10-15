@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 342 tests, must pass 100% before every commit.
+**Current test baseline:** 408 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -53,8 +53,10 @@ ollama serve
 | `env_settings.py` | `.env` read/write + UI helpers: `gpu_available()`, `gpu_device_name()`, `validate_whisper_combo()` (model/backend/device/compute compatibility), `recommended_combo_for_model()` (auto-apply on model change) |
 | `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
 | `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths); writes its own audit entries through `audit.record()` — no Streamlit import, so it is unit-testable |
+| `insight_rules.py` | Deterministic checks on every LLM answer before it is saved — quote verification, QA scoring, next-action assembly, sentiment guard, anomaly verification + keyword backstop, brand/platform canonicalisation, topic clamping. See **LLM analysis** |
 | `audit.py` | Audit-trail vocabulary + `record()` — action/entity constants, Thai labels, secret redaction, `diff_fields()`. Every page logs through it (`ui_helpers.audit()` fills in the signed-in user) |
 | `case_workflow.py` | Case ownership rules — `claim()` / `release()` / `change_status()`; only the claimer changes status, Admin/Supervisor may release (not take) someone's claim, QA can't claim. Logs to audit + notifies Discord. No Streamlit import |
+| `labels.py` | Thai words for every code shown on screen (`call_status()`, `case_status()`, `sentiment()`, `field()` for audit-log field names) and `thai_time()` — UTC ISO → `dd/mm/yyyy HH:MM น.` in UTC+7. No Streamlit import |
 | `discord_notify.py` | Discord incoming-webhook sender (`DISCORD_WEBHOOK_URL`); background thread, never raises, `allowed_mentions` off, phone masked to last 4 digits |
 | `auth.py` | PBKDF2 hashing, DB/`.env` account lookup, role → page permission matrix (`ROLE_PERMISSIONS`, `can_access()`, `visible_pages()`) |
 | `stt/` | STT sub-package: `audio.py` → `transcribe.py` → `diarize.py` → `orchestrator.py` |
@@ -67,9 +69,9 @@ Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py` (Dashboard → �
 
 The Dashboard used to be one ~1,000-line page; the professor found it too hard to read, so each topic is its own page (`auth.DASHBOARD_PAGES`), shown under one **Dashboard** heading in the sidebar. `Home._SECTIONS` maps every page to a sidebar heading (`""` = top, no heading).
 
-- Every Dashboard page calls `dashboard_common.load_filtered_calls()` — one shared filter bar (date / topic / sentiment / load limit). Streamlit drops widget state when another page runs, so the values are mirrored into `_keep_*` session keys and restored before the widgets draw (`restore_filters()` / `remember_filters()`). Saved date ranges are clamped to the loaded calls because `st.date_input` raises when its value is outside min/max.
+- Every Dashboard page calls `dashboard_common.load_filtered_calls()` — one shared filter bar (date / topic / sentiment / load limit). Each page draws its own copy of the widgets and Streamlit does **not** carry a widget's value to the same key on another page (it silently falls back to the first option). So the real values live in `_keep_*` session keys: `restore_filters()` writes them back on **every** run before the widgets draw, and each widget has `on_change=remember_filters` so a change is saved before the next restore. Saved date ranges are clamped to the loaded calls because `st.date_input` raises when its value is outside min/max.
 - Chart styling (`CHART_LAYOUT`, palettes, `hbar()`) lives in `dashboard_common` too — new charts should use it rather than copy the Plotly settings.
-- `11_Cases.py` reads cases straight from SQL and loads no calls.
+- `11_Cases.py` reads cases straight from SQL, then only the calls of the cases on screen (`db.get_calls_for_cases()`, one query). Case subjects are just the first call's broad topic, so the table and panel show `case_workflow.case_brief()` instead — latest summary, specific problem type, next step, urgency — so staff know what they are claiming.
 
 ### Speaker correction pipeline (`pipeline.py:1408-1459`)
 
@@ -90,19 +92,28 @@ Pyannote frequently mislabels speakers; LLM also makes mistakes — the system u
 
 **Critical order constraint:** `_aggressive_relabel_from_strong_cues` must run **before** `_merge_adjacent_same_speaker`, or merging will lock in wrong labels permanently.
 
-### LLM analysis (`ollama_client.py:300+`)
+### LLM analysis (`ollama_client.py`) — the model proposes, `insight_rules.py` decides
 
-4 separate Ollama calls (split for context window + accuracy):
-1. `extract_summary_and_topics()` — summary, topic, **topic_detail** (drill-down for product-issue calls), keywords, brand/platform mentions
-2. `analyze_sentiment()` — sentiment + reason
-3. `evaluate_agent_qa()` — politeness, problem_solving, evidence, overall_score, next_action, next_action_owner
-4. `detect_anomaly()` — anomaly flag, reason, severity
+5 Ollama requests per call, all `format: "json"`, temperature 0, `num_ctx` = `OLLAMA_NUM_CTX` (default 12288 — Ollama's own default on a 16 GB GPU is 4096, which silently cut the start of the QA prompt):
+1. `extract_summary_and_topics()` — summary, topic, **topic_detail**, keywords, brand/platform mentions
+2. `analyze_sentiment()` — customer_quote → reason → sentiment (quote first grounds the label)
+3. `evaluate_agent_qa()` — QA checklist: `"found": [{"item": "P1", "quote": ...}]` + `customer_had_problem`
+3b. same function, **separate request** for the next action (`prompts.NEXT_ACTION_USER`) — asked together with the checklist, the model returned `pending: false` on calls that plainly had open work
+4. `detect_anomaly()` — category + evidence_quote + reason
 
-Every call → `extract_json()` → falls back to empty dict on parse failure (logs and continues).
+Every request → `extract_json()` → empty dict on failure (logs and continues). The transcript is capped at `MAX_CHARS` (14,000) by dropping the **middle** — the old cut kept only the first 6,000 characters and lost the close of 4 in 11 real calls.
 
-Agent QA guardrails: `politeness` and `problem_solving` must be supported by Agent quotes, persisted as `politeness_evidence` / `problem_solving_evidence`; scores are clamped to 1-5 and `overall_score` is recomputed as `politeness + problem_solving` in Python.
+**Never trust the model's totals, flags or lists — `insight_rules.py` recomputes them** (all validated on the 11 real calls, see `tests/test_insight_rules.py`):
+- QA: an item counts only if its quote is something the agent said (`agent_said()`: not in a `Customer:` line, or in agent voice — diarization leaves agent words as "Speaker 0" or merged into customer lines). P2 (polite particles) is measured, not quoted. Score = share of applicable items (P3 only applies when the customer had a problem), 1-5. The old prompt scored every call 5/5.
+- Next action: `build_next_action()` joins todo | detail | deadline | follow-up, fills "ไม่ระบุในสาย (แนะนำ: …)" from the owner, strips template leftovers (`<...>`, `[บริบท]`); `money_action_is_ungrounded()` rejects a refund task on a call with no money talk (the old example "ติดตามการโอนเงินคืน" was copied onto unrelated calls).
+- Sentiment: `check_sentiment()` — positive needs a praise word in the customer's quote ("ขอบคุณครับ" alone was labelled positive); a swearing/explicitly displeased customer is never positive/neutral.
+- Anomaly: `verify_anomaly()` — the quote must occur in the call and contain a keyword of its category; severity comes from the category table. `keyword_anomaly()` is a backstop that scans **Customer lines only** for health words and profanity. Keywords are matched with `has_keyword()`, which knows Thai traps ("แจ้งความต้องการ" ≠ "แจ้งความ").
+- Brands/platforms: `canonical_mentions()` keeps only names actually said (the company greeting "บริษัทที่นอนโลตัส" doesn't count) under one spelling; the dashboard regroups older rows with `canonical_name()`.
+- Topic: `normalize_topic()` clamps to the 9 topics.
 
-`topic_detail` vocabulary (filled only when `topic == "แจ้งปัญหาสินค้า"`): `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ`. Output is clamped server-side via `normalize_topic_detail()` so the dashboard can group cleanly.
+`topic_detail` vocabulary (filled only when `topic == "แจ้งปัญหาสินค้า"`): `ผ้าขาด/ผ้าหุ้มชำรุด`, `เตียง/โครงหัก`, `สปริง/ฟองน้ำยุบ`, `เปื้อน/รอยขีดข่วน`, `กลิ่น/แพ้/ระคายเคือง`, `ความชื้น/น้ำท่วม`, `ขนาด/สเปคผิด`, `อื่นๆ`. Clamped via `normalize_topic_detail()` (stems are whole words — a bare "รา" matched "รายละเอียด").
+
+**Prompt changes are validated by re-running the 4 analyses on the stored transcripts** and comparing against the previous prompts — a script like that is cheaper than a full STT run and caught every regression above.
 
 ### Auto case assignment (`pipeline.py:_auto_assign_case`)
 
@@ -144,9 +155,10 @@ Anomaly = escalation-worthy event, NOT just negative sentiment. Every flag requi
 | A1 Legal threat | "ฟ้อง", "ทนาย", "ดำเนินคดี", "ศาล", "แจ้งความ" | high |
 | A2 Complaint threat | "สคบ.", "ร้องเรียน", "กระทรวง", "เพจ", "สื่อ" | high |
 | A3 Escalation request | "ขอคุยกับหัวหน้า", "ขอสายผู้จัดการ" | medium |
-| A4 Profanity | Actual swear words (not just tone) | low |
+| A4 Profanity | Actual swear words / กู-มึง (not just tone) | low |
 | B Agent misconduct | Direct quote required | high |
-| C Safety/legal | "เชื้อรา", "สารเคมี", "บาดเจ็บ", damage + amount | medium-low |
+| C1 Health from the product | "แพ้", "ผื่น", "คัน", "แสบ", "ระคายเคือง", "เชื้อรา", "สารเคมี", "บาดเจ็บ" | medium |
+| C2 Disaster / C3 compensation | "น้ำท่วม", "ไฟไหม้" / "ค่าเสียหาย", "ชดเชย" | medium / low |
 
 Normal complaints resolved politely = negative sentiment, **not** anomaly.
 
@@ -260,6 +272,19 @@ Rules that keep the trail trustworthy:
 - UI for every role lives in `ui_helpers.render_case_ownership(case, key_suffix)`; keys include the case id and a suffix because the Admin page draws the same case under each of its calls.
 - Discord: `DISCORD_WEBHOOK_URL` (Settings page). Unset → nothing is sent. The URL is a secret and `audit.redact()` drops it.
 
+## UI conventions (company-facing)
+
+- **Thai on screen, codes in the DB.** Show statuses/sentiment/field names through `smartvoice.labels`; show timestamps with `labels.thai_time()` — never `created_at[:19]` or "UTC" (staff are in UTC+7; the DB stores UTC).
+- **Menu:** `Home._PAGE_SPECS` gives every page a Thai title and a `:material/...:` icon (`tests/test_usability.py` checks both), and `st.navigation(..., expanded=True)` — without it Streamlit hides links past the 10th behind "View more".
+- **Home page** is a work queue: unclaimed cases, my open cases, severe anomalies, each with an `st.page_link` shortcut. The case shortcuts pass `?owner=unassigned|mine`, which `11_Cases.py` applies once to its owner filter and then removes.
+- **Destructive actions ask first.** Deleting calls (one or many) and merging cases open an `@st.dialog` with "ลบถาวร"/"ยกเลิก". File removal goes through `file_manager.remove_audio_file()`, which reports a locked file instead of raising.
+- **Click any cell to read the row.** Tables with long text (Cases, Call list, Agent Performance, Audit Log) use `selection_mode=ui_helpers.TABLE_CLICK_MODES` (row + cell, so a click on the text counts, not only the narrow checkbox) and open an `@st.dialog(width="large")` with the full text. `ui_helpers.picked_row()` returns `(row, is_new)` so the dialog opens once per click, not on every rerun; each page also offers a "เปิด…อีกครั้ง" button.
+- **Selections are row positions, not ids.** When an action reorders the table (claiming a case bumps its `updated_at`), the selection points at a different row. The Cases table key includes a hash of the row order so the selection resets, and the dialog re-opens by the remembered case id (`_case_dialog_case`) to show the result.
+- Transcripts render through `ui_helpers.render_transcript()` — labels [พนักงาน]/[ลูกค้า], HTML-escaped (the text comes from speech recognition).
+- Show **when the call happened** from `file_manager.extract_call_time_from_filename()`; `created_at` is only the upload time.
+- Messages that must survive `st.rerun()` go through a session "flash" (Admin page `_flash()`), otherwise they vanish before anyone reads them.
+- Model names (STT/LLM) in the sidebar and the readiness checks on Home are Admin/Settings-only; other roles never see them.
+
 ## Settings page behavior
 
 `pages/4_Settings.py` is intentionally NOT wrapped in `st.form` because Streamlit form widgets don't fire `on_change` callbacks until form submit. The page uses reactive widgets (each with `key=`) + a single `st.button("Save Settings")` to commit all values together.
@@ -275,15 +300,17 @@ Key behaviors:
 
 - **`test_config.py`** manipulates env vars with side-effects on other tests — always pass `--ignore=tests\test_config.py`.
 - **`created_at` in DB** = upload/process time, not the actual call date. Call date is in the filename: `YYYYMMDDHHMMSS-...`.
-- **LLM nested bullets** — Typhoon 8B copies sub-bullets as `anomaly_reason` without evidence. Prompts must specify keyword required list and mandate quoting.
-- **Agent QA examples** — avoid concrete fake values in Next Action examples; Typhoon can copy them into every call. Use abstract templates and keep `sanitize_next_action()` in the display path for older DB rows.
+- **Typhoon 8B copies whatever the prompt shows**: example actions ("ติดตามการโอนเงินคืน"), placeholder text (`<เบอร์ที่ลูกค้าให้ไว้>`), brand lists, *and pre-filled JSON answer templates* (a skeleton with `"done": false` / `"pending": false` came back unchanged). Describe the keys in words instead of showing a filled skeleton, give no concrete example values, and verify in `insight_rules`. Keep `sanitize_next_action()` in the display path for older DB rows.
+- **One request, one job.** Bundling the next action into the QA request made the model drop it; it is its own request now.
 - **Common Whisper errors:** "โอมาสนา"/"โนโลตัส"/"ฟิวทู" for brand names; "ที่โน่น"/"ทีเนี่ย" for "ที่นอน"; Thai phone numbers often mixed Thai/Arabic digits.
 - **PowerShell:** Never use `cd` — set `Cwd` parameter instead.
 - **Imports** must be at the top of every file; never mid-file.
 - **Never slice Thai text to a character count** (`summary[:100]`). Thai has no spaces between words, so the cut always lands mid-word — show the text in full and let it wrap.
 - **Streamlit widget keys that edit a picked row must include the row id** (`key=f"_edit_role_{user_id}"`). With a fixed key Streamlit keeps the previous row's value and ignores `value=`, so switching rows saves stale data over the new one.
 - **An `st.expander` body runs even while collapsed.** Anything slow inside it (network checks, big queries) runs on every rerun — cache it.
-- **UI labels are words, not emoji.** `tests/test_home_entrypoint.py` fails if a decorative icon comes back. The page *file names* (`pages/1_📤_Admin.py`) still contain emoji and `Home.py` routes to those exact paths — don't strip them.
+- **Same widget key on two pages ≠ same widget.** Streamlit leaves the old value in session state but the new page's widget ignores it and resets to its first option. Persist cross-page values in a plain key and write them back every run (see `dashboard_common.restore_filters`).
+- **Network calls on a page must be cached** (`@st.cache_data`) — the Settings readiness checks used to hit Ollama/HuggingFace (~2.6 s) on every click.
+- **UI labels are words, not emoji.** Menu entries use Material icons (`:material/...:`) next to the words, set explicitly so Streamlit doesn't pick up the emoji in some page file names. `tests/test_home_entrypoint.py` fails if a decorative icon comes back. The page *file names* (`pages/1_📤_Admin.py`) still contain emoji and `Home.py` routes to those exact paths — don't strip them.
 
 ## Pre-commit Checklist
 

@@ -1,12 +1,10 @@
-import json
-import os
 
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Admin", layout="wide")
+st.set_page_config(page_title="SmartVoice — อัปโหลดและประมวลผลเสียง", layout="wide")
 
 from smartvoice import audit as audit_trail
-from smartvoice import case_workflow, db, file_manager
+from smartvoice import case_workflow, db, file_manager, labels
 from smartvoice.auth import PAGE_ADMIN, role_label
 from smartvoice.file_manager import extract_direction_from_filename
 from smartvoice.preflight import get_ollama_readiness, ollama_setup_lines
@@ -18,6 +16,7 @@ from smartvoice.ui_helpers import (
     launch_processing_queue,
     metric_card,
     render_case_ownership,
+    render_transcript,
     status_badge,
 )
 
@@ -28,9 +27,93 @@ _current_user, _current_role = init_page(PAGE_ADMIN)
 # ─────────────────────────────────────────
 # PAGE: ADMIN — Upload & Process
 # ─────────────────────────────────────────
-st.title("Admin — อัปโหลดและประมวลผล")
+st.title("อัปโหลดและประมวลผลเสียง")
 
-st.caption(f"กำลังเข้าสู่ระบบในชื่อ **{_current_user}** — _{role_label(_current_role)}_ — ไฟล์ที่อัพโหลดจะถูกบันทึกชื่อผู้อัพโหลด")
+st.caption(
+    "ขั้นตอน: 1) อัปโหลดไฟล์เสียง → 2) กดประมวลผล ระบบจะถอดเสียง สรุปเรื่อง และสร้างเคสให้เอง "
+    f"→ 3) ตรวจผลรายไฟล์ด้านล่าง  •  ผู้ใช้: **{_current_user}** ({role_label(_current_role)})"
+)
+
+
+def _flash(kind: str, message: str) -> None:
+    """Keep a message across st.rerun() — otherwise it vanishes before anyone reads it."""
+    st.session_state["_admin_flash"] = (kind, message)
+
+
+_pending_flash = st.session_state.pop("_admin_flash", None)
+if _pending_flash:
+    getattr(st, _pending_flash[0])(_pending_flash[1])
+
+
+def _delete_calls(calls: list[dict], bulk: bool) -> tuple[int, list[str]]:
+    """Remove the audio files and DB rows of `calls`; returns (deleted, files we couldn't remove).
+
+    A file that can't be removed (open in another program, already gone) must not
+    stop the rest — the row is still deleted and the user is told which file to
+    clean up by hand.
+    """
+    stuck = [c["filename"] for c in calls if not file_manager.remove_audio_file(c.get("file_path"))]
+    db.delete_calls_bulk([c["id"] for c in calls])
+    for call in calls:
+        audit(
+            audit_trail.DELETE,
+            audit_trail.ENTITY_CALL,
+            entity_id=call["id"],
+            entity_label=call["filename"],
+            changes={"status": call["status"], "bulk": bulk} if bulk else {"status": call["status"]},
+        )
+    for call in calls:
+        st.session_state.get("selected_calls", set()).discard(call["id"])
+        st.session_state.pop(f"chk_{call['id']}", None)
+    return len(calls), stuck
+
+
+@st.dialog("ยืนยันการลบไฟล์เสียง")
+def _confirm_delete_dialog(calls: list[dict], bulk: bool) -> None:
+    st.warning(
+        f"จะลบ **{len(calls)} ไฟล์** พร้อมผลวิเคราะห์ของไฟล์เหล่านี้ — **ลบแล้วกู้คืนไม่ได้**"
+    )
+    for call in calls[:8]:
+        st.caption(f"- {call['filename']}")
+    if len(calls) > 8:
+        st.caption(f"และอีก {len(calls) - 8} ไฟล์")
+    yes_col, no_col = st.columns(2)
+    if yes_col.button("ลบถาวร", type="primary", use_container_width=True):
+        deleted, stuck = _delete_calls(calls, bulk)
+        if stuck:
+            _flash(
+                "warning",
+                f"ลบข้อมูล {deleted} ไฟล์แล้ว แต่ลบไฟล์เสียงในเครื่องไม่ได้ {len(stuck)} ไฟล์ "
+                f"(อาจถูกเปิดอยู่): {', '.join(stuck)}",
+            )
+        else:
+            _flash("success", f"ลบ {deleted} ไฟล์เรียบร้อยแล้ว")
+        st.rerun()
+    if no_col.button("ยกเลิก", use_container_width=True):
+        st.rerun()
+
+
+@st.dialog("ยืนยันการรวมเคส")
+def _confirm_merge_dialog(src: dict, dst_id: int, dst_label: str) -> None:
+    st.write(
+        f"ย้ายสายทั้งหมดจาก **เคส #{src['id']}: {src['subject']}** ไปไว้ที่ **{dst_label}** "
+        f"แล้วลบเคส #{src['id']} ทิ้ง"
+    )
+    st.caption("ทำแล้วย้อนกลับไม่ได้")
+    yes_col, no_col = st.columns(2)
+    if yes_col.button("รวมเคส", type="primary", use_container_width=True):
+        moved = db.merge_cases(src["id"], dst_id)
+        audit(
+            audit_trail.DELETE,
+            audit_trail.ENTITY_CASE,
+            entity_id=src["id"],
+            entity_label=src["subject"],
+            changes={"merged_into_case_id": dst_id, "moved_calls": moved},
+        )
+        _flash("success", f"ย้าย {moved} สายไปเคส #{dst_id} และลบเคส #{src['id']} แล้ว")
+        st.rerun()
+    if no_col.button("ยกเลิก", use_container_width=True):
+        st.rerun()
 
 # Upload section
 st.subheader("1. อัปโหลดไฟล์เสียง")
@@ -160,10 +243,10 @@ if _orphan_count > 0:
             help="ลบเคสที่ไม่มีสายชี้มา (เกิดจากการลบไฟล์เสียงก่อนหน้า)",
         ):
             removed = db.delete_orphan_cases()
-            st.success(f"ลบ {removed} เคสที่ค้างเรียบร้อยแล้ว")
+            _flash("success", f"ล้างเคสว่าง {removed} เคสเรียบร้อยแล้ว")
             st.rerun()
     with orph_col2:
-        st.caption(f"พบ {_orphan_count} เคสที่ไม่มีสายอ้างอิง (orphan) — กดปุ่มซ้ายเพื่อล้าง")
+        st.caption(f"มี {_orphan_count} เคสที่ไม่เหลือสายแล้ว (เพราะไฟล์เสียงถูกลบ) — กดปุ่มซ้ายเพื่อล้างออก")
 
 st.divider()
 
@@ -337,23 +420,9 @@ else:
         )
 
     if delete_selected_btn and st.session_state.selected_calls:
-        ids_to_delete = list(st.session_state.selected_calls)
-        calls_to_delete = [c for c in refresh_calls if c["id"] in ids_to_delete]
-        for call in calls_to_delete:
-            if call["file_path"] and os.path.exists(call["file_path"]):
-                os.remove(call["file_path"])
-        db.delete_calls_bulk(ids_to_delete)
-        for call in calls_to_delete:
-            audit(
-                audit_trail.DELETE,
-                audit_trail.ENTITY_CALL,
-                entity_id=call["id"],
-                entity_label=call["filename"],
-                changes={"status": call["status"], "bulk": True},
-            )
-        st.session_state.selected_calls = set()
-        st.success(f"ลบ {len(ids_to_delete)} ไฟล์เรียบร้อยแล้ว")
-        st.rerun()
+        _confirm_delete_dialog(
+            [c for c in refresh_calls if c["id"] in st.session_state.selected_calls], bulk=True
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -388,12 +457,12 @@ else:
             _eff_st = "processing"
         _phone = call.get("customer_phone") or ""
         _phone_tag = f"  •  เบอร์: {_phone}" if _phone else ""
-        _date_short = (call.get("created_at") or "")[:10]
+        _date_short = labels.thai_time(call.get("created_at"), with_time=False)
         _uploader_short = call.get("uploaded_by") or "—"
         _hdr_name = _shrink_name(call["filename"])
         _hdr = (
-            f"ไฟล์: {_hdr_name}  —  สถานะ: {_st_label.get(_eff_st, _eff_st)}"
-            f"{_phone_tag}  •  วันที่: {_date_short}  •  ผู้อัปโหลด: {_uploader_short}"
+            f"{_hdr_name}  —  {_st_label.get(_eff_st, _eff_st)}"
+            f"{_phone_tag}  •  อัปโหลด {_date_short} โดย {_uploader_short}"
         )
         with st.expander(_hdr):
             chk_col, info_col, action_col = st.columns([0.3, 2, 1])
@@ -405,15 +474,15 @@ else:
                 )
 
             with info_col:
-                st.markdown(f"**File:** `{call['file_path']}`")
+                st.markdown(f"**ไฟล์:** {call['filename']}")
                 if _phone:
                     st.markdown(f"**เบอร์ลูกค้า (จากชื่อไฟล์):** `{_phone}`")
-                _uploaded_ts = call['created_at'][:19].replace('T', ' ')
+                _uploaded_ts = labels.thai_time(call.get("created_at"))
                 _uploader = call.get('uploaded_by') or "—"
                 _uploader_role = call.get('uploaded_by_role') or ""
                 _uploader_label = f"{_uploader} ({_uploader_role})" if _uploader_role else _uploader
                 st.markdown(
-                    f"**อัปโหลดเมื่อ:** {_uploaded_ts} UTC &nbsp;•&nbsp; "
+                    f"**อัปโหลดเมื่อ:** {_uploaded_ts} &nbsp;•&nbsp; "
                     f"**โดย:** {_uploader_label}"
                 )
                 st.markdown(
@@ -422,14 +491,17 @@ else:
                 )
                 if _eff_st == "processing":
                     step = call.get("processing_step") or "กำลังเริ่มต้น..."
-                    updated = call.get("updated_at", "")[:19].replace("T", " ")
+                    updated = labels.thai_time(call.get("updated_at"))
                     st.markdown(
                         f'<div style="color:#93c5fd;font-size:0.85rem;margin-top:4px">{step}</div>'
-                        f'<div style="color:#6b7280;font-size:0.75rem">อัปเดตล่าสุด: {updated} UTC</div>',
+                        f'<div style="color:#9ca3af;font-size:0.75rem">อัปเดตล่าสุด: {updated}</div>',
                         unsafe_allow_html=True,
                     )
                 if call["error_msg"]:
-                    st.error(f"Error: {call['error_msg'][:300]}")
+                    st.error(
+                        "ประมวลผลไม่สำเร็จ — กด *ประมวลผล* อีกครั้ง หรือแจ้งผู้ดูแลระบบ  \n"
+                        f"รายละเอียด: {call['error_msg'][:300]}"
+                    )
 
                 # Customer & Warranty context
                 cust_link = db.get_call_customer_link(call["id"])
@@ -446,23 +518,31 @@ else:
                             if cust_link.get("registration_no"):
                                 st.markdown("**ทะเบียนรับประกัน**")
                                 st.markdown(f"เลขที่: `{cust_link['registration_no']}`")
-                                st.markdown(f"สินค้า: {cust_link.get('brand','')} {cust_link.get('model','')}")
-                                st.markdown(f"ขนาด: {cust_link.get('size','')}")
-                                st.markdown(f"ช่องทาง: {cust_link.get('purchase_channel','')}")
-                                st.markdown(f"วันซื้อ: {cust_link.get('date_of_purchase','')}")
-                                months = cust_link.get("warranty_period_months", 0)
-                                st.markdown(f"ระยะประกัน: {months} เดือน ({months//12} ปี)")
+                                st.markdown(f"สินค้า: {cust_link.get('brand') or ''} {cust_link.get('model') or ''}")
+                                st.markdown(f"ขนาด: {cust_link.get('size') or '-'}")
+                                st.markdown(f"ช่องทาง: {cust_link.get('purchase_channel') or '-'}")
+                                st.markdown(f"วันซื้อ: {labels.thai_time(cust_link.get('date_of_purchase'), with_time=False)}")
+                                months = cust_link.get("warranty_period_months") or 0
+                                if months:
+                                    st.markdown(f"ระยะประกัน: {months} เดือน ({months // 12} ปี)")
+                                else:
+                                    st.markdown("ระยะประกัน: ไม่ระบุ")
                 else:
                     with st.expander("เชื่อมข้อมูลลูกค้า"):
                         all_custs = db.get_all_customers()
-                        if all_custs:
+                        if not all_custs:
+                            st.caption("ยังไม่มีลูกค้าในระบบ — เพิ่มได้ที่เมนู เพิ่ม/แก้ไขข้อมูลลูกค้า")
+                        else:
                             cust_options = {f"{c['first_name']} {c['last_name']} ({c['phone'] or '-'})": c["id"] for c in all_custs}
                             sel = st.selectbox("เลือกลูกค้า", ["— เลือก —"] + list(cust_options.keys()), key=f"cust_sel_{call['id']}")
                             if sel != "— เลือก —":
                                 cid = cust_options[sel]
                                 warrs = db.get_warranties_by_customer(cid)
-                                warr_options = {f"{w['registration_no']} — {w['brand']} {w['model']}": w["id"] for w in warrs}
-                                wsel = st.selectbox("เลือก Warranty (ถ้ามี)", ["— ไม่ระบุ —"] + list(warr_options.keys()), key=f"warr_sel_{call['id']}")
+                                warr_options = {
+                                    f"{w['registration_no']} — {w.get('brand') or ''} {w.get('model') or ''}": w["id"]
+                                    for w in warrs
+                                }
+                                wsel = st.selectbox("เลือกทะเบียนรับประกัน (ถ้ามี)", ["— ไม่ระบุ —"] + list(warr_options.keys()), key=f"warr_sel_{call['id']}")
                                 if st.button("เชื่อมข้อมูล", key=f"link_btn_{call['id']}"):
                                     wid = warr_options.get(wsel) if wsel != "— ไม่ระบุ —" else None
                                     db.link_call_customer(call["id"], cid, wid, matched_by="manual")
@@ -473,7 +553,7 @@ else:
                                         entity_label=call["filename"],
                                         changes={"linked_customer_id": cid, "linked_warranty_id": wid},
                                     )
-                                    st.success("เชื่อมข้อมูลเรียบร้อย")
+                                    _flash("success", "เชื่อมข้อมูลลูกค้าเรียบร้อยแล้ว")
                                     st.rerun()
 
                 # Case info
@@ -510,7 +590,7 @@ else:
                                             entity_label=new_subject,
                                             changes={"subject": [case["subject"], new_subject]},
                                         )
-                                        st.success("อัปเดทหัวข้อเคสเรียบร้อย")
+                                        _flash("success", "บันทึกหัวข้อเคสเรียบร้อยแล้ว")
                                         st.rerun()
 
                             # Merge with another case (same customer only)
@@ -533,7 +613,7 @@ else:
                                     st.markdown("---")
                                     st.caption("**รวมเข้ากับเคสอื่น** (ย้ายสายทั้งหมดจากเคสนี้ไปอีกเคส)")
                                     merge_opts = {
-                                        f"เคส #{cs['id']}: {cs['subject']} ({cs['status']})": cs["id"]
+                                        f"เคส #{cs['id']}: {cs['subject']} ({labels.case_status(cs['status'])})": cs["id"]
                                         for cs in other_cases
                                     }
                                     m_col1, m_col2 = st.columns([3, 1])
@@ -546,59 +626,11 @@ else:
                                         )
                                     with m_col2:
                                         if st.button("รวมเคส", key=f"merge_btn_{call['id']}"):
-                                            dst_id = merge_opts[picked]
-                                            moved = db.merge_cases(case["id"], dst_id)
-                                            audit(
-                                                audit_trail.DELETE,
-                                                audit_trail.ENTITY_CASE,
-                                                entity_id=case["id"],
-                                                entity_label=case["subject"],
-                                                changes={"merged_into_case_id": dst_id, "moved_calls": moved},
-                                            )
-                                            st.success(f"ย้าย {moved} สาย → เคส #{dst_id} และลบเคส #{case['id']}")
-                                            st.rerun()
+                                            _confirm_merge_dialog(case, merge_opts[picked], picked)
 
                 if call["status"] == "done" and call.get("transcript"):
                     with st.expander("บทสนทนาแยกผู้พูด"):
-                        try:
-                            mapping = json.loads(call.get("speaker_mapping") or "{}")
-                        except (json.JSONDecodeError, TypeError):
-                            mapping = {}
-
-                        def _resolve_role(spk: str, m: dict) -> str:
-                            if spk in m:
-                                return m[spk]
-                            spk_l = spk.lower()
-                            for k, v in m.items():
-                                if k.lower() == spk_l:
-                                    return v
-                            import re as _re
-                            nums = _re.findall(r"\d+", spk)
-                            if nums:
-                                n = int(nums[-1])
-                                for cand in [f"SPEAKER_{n:02d}", f"Speaker {n}", f"speaker_{n}"]:
-                                    if cand in m:
-                                        return m[cand]
-                                for k, v in m.items():
-                                    kn = _re.findall(r"\d+", k)
-                                    if kn and int(kn[-1]) == n:
-                                        return v
-                            return spk
-
-                        if mapping:
-                            for raw_line in call["transcript"].splitlines():
-                                if ": " in raw_line:
-                                    spk, txt = raw_line.split(": ", 1)
-                                    role = _resolve_role(spk.strip(), mapping)
-                                    color = "#93c5fd" if role == "Agent" else "#86efac"
-                                    st.markdown(
-                                        f'<span style="color:{color};font-weight:600">[{role}]</span> {txt}',
-                                        unsafe_allow_html=True,
-                                    )
-                                else:
-                                    st.markdown(raw_line)
-                        else:
-                            st.text(call["transcript"])
+                        render_transcript(call)
 
             with action_col:
                 effective_status = call["status"]
@@ -638,22 +670,7 @@ else:
                     use_container_width=True,
                     type="secondary",
                 ):
-                    try:
-                        if call["file_path"] and os.path.exists(call["file_path"]):
-                            os.remove(call["file_path"])
-                        db.delete_call(call["id"])
-                        audit(
-                            audit_trail.DELETE,
-                            audit_trail.ENTITY_CALL,
-                            entity_id=call["id"],
-                            entity_label=call["filename"],
-                            changes={"status": call["status"]},
-                        )
-                        st.session_state.selected_calls.discard(call["id"])
-                        st.success(f"ลบ `{call['filename']}` เรียบร้อยแล้ว")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"ลบไม่สำเร็จ: {exc}")
+                    _confirm_delete_dialog([call], bulk=False)
 
     # ── "Load more" pagination footer ─────────────────────────────────────
     _remaining = len(filtered_calls) - len(visible_calls)

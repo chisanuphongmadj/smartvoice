@@ -16,7 +16,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from smartvoice import db
+from smartvoice import db, insight_rules, labels
 
 # ── Page CSS ─────────────────────────────────────────────────────────────
 
@@ -110,6 +110,8 @@ def hbar(
         hovertemplate=f"<b>%{{y}}</b><br>{hover_unit}<extra></extra>",
     )
     xaxis = dict(gridcolor=GRID_COLOR, zeroline=False)
+    if not data.empty and data["Count"].max() <= 10:
+        xaxis["dtick"] = 1  # counts are whole numbers — no "0.5 สาย" ticks
     if headroom and not data.empty:
         xaxis["range"] = [0, data["Count"].max() * 1.25]
     layout = dict(
@@ -127,18 +129,39 @@ def hbar(
     return fig
 
 
+# Names saved by older prompts are grouped under today's canonical spelling,
+# so "Lotus", "โลตัส" and "Lotus/โลตัส" are one bar, not three.
+_CANONICAL_FIELDS = {
+    "brand_mentions": insight_rules.BRAND_ALIASES,
+    "platform_mentions": insight_rules.PLATFORM_ALIASES,
+}
+# Every call is a phone call; older prompts listed it as a sales channel.
+_IGNORED_VALUES = {"platform_mentions": {"โทรศัพท์", "phone"}}
+
+
 def count_list_field(calls: list[dict], field: str, top: int = 15) -> list[tuple[str, int]]:
-    """Most common strings across a JSON-list column (keywords, brand_mentions, ...)."""
-    found: list[str] = []
+    """Most common strings across a JSON-list column (keywords, brand_mentions, ...).
+
+    Each name counts once per call, after canonicalisation.
+    """
+    aliases = _CANONICAL_FIELDS.get(field)
+    ignored = _IGNORED_VALUES.get(field, set())
+    counter: Counter = Counter()
     for call in calls:
         raw = call.get(field) or ""
         try:
             items = json.loads(raw) if raw else []
         except (json.JSONDecodeError, TypeError):
             continue
-        if isinstance(items, list):
-            found.extend(i for i in items if isinstance(i, str) and i.strip())
-    return Counter(found).most_common(top)
+        if not isinstance(items, list):
+            continue
+        names = {
+            insight_rules.canonical_name(i, aliases) if aliases else i.strip()
+            for i in items
+            if isinstance(i, str) and i.strip() and i.strip().lower() not in ignored
+        }
+        counter.update(names)
+    return counter.most_common(top)
 
 
 # ── Shared filters ───────────────────────────────────────────────────────
@@ -169,12 +192,16 @@ def _kept(key: str) -> str:
 def restore_filters() -> None:
     """Bring back the filters picked on another Dashboard page.
 
-    Streamlit drops a widget's state when a page that doesn't draw that widget
-    runs, so each value is mirrored into a plain session key that survives
-    page switches and copied back before the widget is drawn.
+    Each page draws its own copy of the filter widgets, and Streamlit treats
+    them as different widgets: the value left in session state by the previous
+    page is *not* picked up by the new one, which silently falls back to its
+    first option ("100 สายล่าสุด"). So the real value lives in a plain
+    `_keep_*` key and is written back — every run, not only when missing —
+    before the widgets are drawn. `remember_filters` runs as each widget's
+    on_change, so a change is saved before this restore sees it.
     """
     for key in FILTER_KEYS:
-        if key not in st.session_state and _kept(key) in st.session_state:
+        if _kept(key) in st.session_state:
             st.session_state[key] = st.session_state[_kept(key)]
 
 
@@ -212,8 +239,16 @@ def _filter_summary() -> str:
     intent = st.session_state.get(KEY_INTENT, ALL)
     parts.append("ทุกหัวข้อ" if intent == ALL else intent)
     sentiment = st.session_state.get(KEY_SENTIMENT, ALL)
-    parts.append("ทุก Sentiment" if sentiment == ALL else sentiment)
+    parts.append("ทุกอารมณ์ลูกค้า" if sentiment == ALL else f"ลูกค้า{labels.sentiment(sentiment)}")
     return "  •  ".join(p for p in parts if p)
+
+
+def _option_label(value: str) -> str:
+    return "ทั้งหมด" if value == ALL else value
+
+
+def _sentiment_option(value: str) -> str:
+    return "ทั้งหมด" if value == ALL else labels.sentiment(value)
 
 
 def load_filtered_calls() -> tuple[pd.DataFrame, int]:
@@ -225,7 +260,7 @@ def load_filtered_calls() -> tuple[pd.DataFrame, int]:
 
     total_in_db = db.count_done_calls()
     if total_in_db == 0:
-        st.info("ยังไม่มีสายที่ประมวลผลเสร็จ — อัปโหลดและประมวลผลไฟล์เสียงจากหน้า Admin ก่อน")
+        st.info("ยังไม่มีสายที่ประมวลผลเสร็จ — อัปโหลดและประมวลผลไฟล์เสียงที่เมนู อัปโหลดและประมวลผลเสียง ก่อน")
         st.stop()
 
     if st.session_state.get(KEY_LIMIT) not in LIMIT_OPTIONS:
@@ -255,16 +290,26 @@ def load_filtered_calls() -> tuple[pd.DataFrame, int]:
     with st.expander(f"ตัวกรอง: {_filter_summary()}", expanded=False):
         f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1, 1.2])
         with f_col1:
-            st.date_input("ช่วงวันที่", min_value=min_date, max_value=max_date, key=KEY_DATES)
+            st.date_input(
+                "ช่วงวันที่", min_value=min_date, max_value=max_date, key=KEY_DATES,
+                on_change=remember_filters,
+            )
         with f_col2:
-            st.selectbox("Intent / Topic", intent_options, key=KEY_INTENT)
+            st.selectbox(
+                "หัวข้อที่ลูกค้าโทรมา", intent_options, key=KEY_INTENT, format_func=_option_label,
+                on_change=remember_filters,
+            )
         with f_col3:
-            st.selectbox("Sentiment", SENTIMENT_OPTIONS, key=KEY_SENTIMENT)
+            st.selectbox(
+                "อารมณ์ลูกค้า (Sentiment)", SENTIMENT_OPTIONS, key=KEY_SENTIMENT,
+                format_func=_sentiment_option, on_change=remember_filters,
+            )
         with f_col4:
             st.selectbox(
                 "จำนวนสายที่โหลด",
                 list(LIMIT_OPTIONS.keys()),
                 key=KEY_LIMIT,
+                on_change=remember_filters,
                 help=f"ระบบมีทั้งหมด {total_in_db:,} สาย — เลือกจำนวนที่ต้องการโหลดเพื่อวิเคราะห์",
             )
         st.caption("ตัวกรองนี้ใช้ร่วมกันทุกหน้าในหมวด Dashboard")

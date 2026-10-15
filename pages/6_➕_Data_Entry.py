@@ -3,11 +3,11 @@
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice — Data Entry", layout="wide")
+st.set_page_config(page_title="SmartVoice — เพิ่ม/แก้ไขข้อมูลลูกค้า", layout="wide")
 
 from datetime import date
 
-from smartvoice import customer_entry, db
+from smartvoice import customer_entry, db, labels
 from smartvoice.auth import PAGE_DATA_ENTRY
 from smartvoice.ui_helpers import init_page
 
@@ -15,7 +15,7 @@ from smartvoice.ui_helpers import init_page
 current_user, current_role = init_page(PAGE_DATA_ENTRY)
 
 st.title("ข้อมูลลูกค้า & ทะเบียนรับประกัน")
-st.caption("เพิ่ม / แก้ไข / ลบ ข้อมูลลูกค้าและทะเบียนรับประกัน — ดูภาพรวมทั้งหมดได้ที่หน้า Customers")
+st.caption("เพิ่ม / แก้ไข / ลบ ข้อมูลลูกค้าและทะเบียนรับประกัน — ค้นหาและดูภาพรวมได้ที่เมนู ลูกค้าและการรับประกัน")
 
 _OTHER = "อื่นๆ"
 _NONE = "—"
@@ -264,7 +264,7 @@ with tab_customer:
             "เบอร์": lambda c: c["phone"] or "—",
             "อีเมล": lambda c: c["email"] or "—",
             "จังหวัด": lambda c: c["city_province"] or "—",
-            "เพิ่มเมื่อ": lambda c: c["created_at"][:19].replace("T", " "),
+            "เพิ่มเมื่อ": lambda c: labels.thai_time(c["created_at"]),
         },
         "ยังไม่มีข้อมูลลูกค้าในระบบ",
     )
@@ -527,7 +527,7 @@ with tab_warranty:
                 "ขนาด": lambda w: w["size"] or "—",
                 "วันที่ซื้อ": lambda w: w["date_of_purchase"] or "—",
                 "หมดประกัน": lambda w: w["expiry_date"] or "—",
-                "เพิ่มเมื่อ": lambda w: w["created_at"][:19].replace("T", " "),
+                "เพิ่มเมื่อ": lambda w: labels.thai_time(w["created_at"]),
             },
             "ยังไม่มีทะเบียนรับประกันในระบบ",
         )
@@ -552,7 +552,7 @@ with tab_hidden:
             f"**{row['first_name']} {row['last_name']}** · `{row['phone'] or '-'}` · id={row['id']}"
         )
         cols[1].caption(f"ซ่อนโดย: {row['deleted_by'] or '—'}")
-        cols[2].caption(f"เมื่อ: {(row['deleted_at'] or '')[:19].replace('T', ' ')}")
+        cols[2].caption(f"เมื่อ: {labels.thai_time(row['deleted_at'])}")
         if cols[3].button("กู้คืน", key=f"_restore_c_{row['id']}", use_container_width=True):
             result, error = customer_entry.restore_customer(
                 row["id"], actor=current_user, actor_role=current_role
@@ -577,7 +577,7 @@ with tab_hidden:
             f"**{row['registration_no']}** · {row['brand'] or '-'} {row['model'] or ''} · {owner}"
         )
         cols[1].caption(f"ซ่อนโดย: {row['deleted_by'] or '—'}")
-        cols[2].caption(f"เมื่อ: {(row['deleted_at'] or '')[:19].replace('T', ' ')}")
+        cols[2].caption(f"เมื่อ: {labels.thai_time(row['deleted_at'])}")
         if cols[3].button("กู้คืน", key=f"_restore_w_{row['id']}", use_container_width=True):
             error = customer_entry.restore_warranty(
                 row["id"], actor=current_user, actor_role=current_role

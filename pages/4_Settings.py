@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-st.set_page_config(page_title="SmartVoice - Settings", layout="wide")
+st.set_page_config(page_title="SmartVoice — ตั้งค่าระบบ", layout="wide")
 
 from smartvoice.env_settings import (
     DEMO_PRESET,
@@ -25,46 +25,58 @@ from smartvoice.ui_helpers import audit, init_page
 # Admin/Supervisor only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_SETTINGS)
 
-st.title("Settings")
-st.caption("ปรับโหมด demo และ AI ได้จากหน้านี้ โดยไม่ต้องเปิดไฟล์ `.env` เอง")
+st.title("ตั้งค่าระบบ")
+st.caption(
+    "ปรับโหมดการทำงานของ AI และการแจ้งเตือน Discord ได้จากหน้านี้ โดยไม่ต้องแก้ไฟล์ `.env` เอง "
+    "— ค่าส่วนใหญ่มีผลหลังเปิดโปรแกรมใหม่ (ปิดแล้วเปิด run.bat อีกครั้ง)"
+)
+
+
+@st.cache_data(ttl=300, show_spinner="กำลังตรวจความพร้อมของระบบ...")
+def _cached_preflight_checks():
+    """Readiness checks hit Ollama and HuggingFace over the network (~2.6 s).
+    Uncached, every click on this page waited for them."""
+    return run_preflight_checks()
 
 values = read_env()
 
 mode_col, status_col = st.columns([1.2, 1])
 
 with mode_col:
-    st.subheader("Quick Mode")
-    st.write("เลือก preset แล้วกด Apply เพื่อบันทึกลง `.env`")
+    st.subheader("เลือกโหมดด่วน")
+    st.write("กดปุ่มเดียวเพื่อตั้งค่าทั้งชุด")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Use Demo Laptop Mode", use_container_width=True):
+        if st.button("โหมดสาธิต (ไม่ต้องใช้ GPU)", use_container_width=True,
+                     help="ใช้บทสนทนาตัวอย่างแทนการถอดเสียงจริง — เหมาะกับโน้ตบุ๊กหรือการนำเสนอ"):
             write_env(DEMO_PRESET)
             audit(
                 audit_trail.UPDATE, audit_trail.ENTITY_SETTINGS,
                 entity_label="Demo Laptop Mode", changes=dict(DEMO_PRESET),
             )
-            st.success("Saved demo mode. Restart the app to apply all settings.")
+            st.success("บันทึกโหมดสาธิตแล้ว — ปิดและเปิดโปรแกรมใหม่เพื่อให้มีผล")
             st.rerun()
     with c2:
-        if st.button("Use Real AI Mode", use_container_width=True):
+        if st.button("โหมดใช้งานจริง (AI เต็มรูปแบบ)", use_container_width=True,
+                     help="ถอดเสียงจริงด้วย Whisper + แยกผู้พูด — ต้องมี HuggingFace token และเครื่องแรงพอ"):
             write_env(REAL_AI_PRESET)
             audit(
                 audit_trail.UPDATE, audit_trail.ENTITY_SETTINGS,
                 entity_label="Real AI Mode", changes=dict(REAL_AI_PRESET),
             )
-            st.success("Saved real AI mode. Add HF token if needed, then restart.")
+            st.success("บันทึกโหมดใช้งานจริงแล้ว — ใส่ HuggingFace token (ถ้ายังไม่มี) แล้วเปิดโปรแกรมใหม่")
             st.rerun()
 
 with status_col:
-    st.subheader("Current Mode")
+    st.subheader("โหมดปัจจุบัน")
     is_demo = env_bool(values, "MOCK_STT", default=False)
-    st.metric("STT", "Demo / Mock" if is_demo else "Real AI")
+    st.metric("การถอดเสียง", "โหมดสาธิต" if is_demo else "ใช้งานจริง")
     token = values.get("HF_TOKEN", "")
-    st.caption(f"HF token: `{mask_secret(token) or 'not set'}`")
+    st.caption(f"HuggingFace token: `{mask_secret(token) or 'ยังไม่ได้ตั้งค่า'}`")
 
 st.divider()
 
-st.subheader("Demo & AI Settings")
+st.subheader("ตั้งค่าโดยละเอียด")
 
 # NOTE: This section is intentionally NOT wrapped in `st.form` so the
 # Whisper model selector can fire its `on_change` callback immediately —
@@ -72,20 +84,20 @@ st.subheader("Demo & AI Settings")
 # `st.button` at the bottom to commit all values to `.env` together.
 
 demo_mode = st.toggle(
-    "Demo mode (skip real STT and use mock transcripts)",
+    "โหมดสาธิต (ไม่ถอดเสียงจริง ใช้บทสนทนาตัวอย่าง)",
     value=env_bool(values, "MOCK_STT", default=False),
 )
 
-st.markdown("#### Real AI")
+st.markdown("#### AI สำหรับการใช้งานจริง")
 hf_token = st.text_input(
     "HuggingFace token",
     value="",
     type="password",
-    placeholder="Leave blank to keep current token",
-    help="Required for pyannote speaker diarization in real AI mode.",
+    placeholder="เว้นว่างไว้ = ใช้ค่าเดิม",
+    help="จำเป็นสำหรับการแยกเสียงพนักงาน/ลูกค้า (pyannote) ในโหมดใช้งานจริง",
     key="_hf_token_input",
 )
-clear_hf_token = st.checkbox("Clear saved HuggingFace token")
+clear_hf_token = st.checkbox("ลบ HuggingFace token ที่บันทึกไว้")
 
 ollama_base_url = st.text_input(
     "Ollama base URL",
@@ -98,7 +110,7 @@ ollama_model = st.text_input(
     key="_ollama_model_input",
 )
 
-st.markdown("#### Speech model")
+st.markdown("#### โมเดลถอดเสียง (Whisper)")
 
 # GPU availability check — hides cuda from Device dropdown when no GPU
 # is present, so the user can't accidentally save a combo that will crash
@@ -221,7 +233,7 @@ if st.button("ส่งข้อความทดสอบ", key="_discord_test
     )
     (st.success if _ok else st.error)(_detail)
 
-submitted = st.button("Save Settings", use_container_width=True, type="primary")
+submitted = st.button("บันทึกการตั้งค่า", use_container_width=True, type="primary")
 
 if submitted:
     updates = {
@@ -258,7 +270,7 @@ if submitted:
             audit_trail.UPDATE, audit_trail.ENTITY_SETTINGS,
             entity_label="Save Settings", changes=changed,
         )
-    st.success("Saved to `.env`. Restart the app with `run.bat` so every module uses the new settings.")
+    st.success("บันทึกแล้ว — ปิดและเปิดโปรแกรมใหม่ด้วย `run.bat` เพื่อให้ค่าใหม่มีผลทุกส่วน")
     if webhook_error:
         st.error(webhook_error)
 
@@ -281,8 +293,10 @@ if submitted:
 
 st.divider()
 
-st.subheader("Readiness Checks")
-for check in run_preflight_checks():
+st.subheader("ตรวจความพร้อมของระบบ")
+if st.button("ตรวจสอบใหม่", key="_settings_recheck"):
+    _cached_preflight_checks.clear()
+for check in _cached_preflight_checks():
     if check.ok:
         st.success(f"{check.name}: {check.detail}")
     elif check.severity == "error":

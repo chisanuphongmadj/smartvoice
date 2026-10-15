@@ -1,8 +1,8 @@
 from smartvoice import prompts
 
 
-def test_agent_qa_prompt_marks_inferred_sla_as_recommendation():
-    _, user_prompt = prompts.build_agent_qa_prompt("Agent: รับเรื่องไว้ค่ะ")
+def test_next_action_prompt_marks_inferred_sla_as_recommendation():
+    _, user_prompt = prompts.build_next_action_prompt("Agent: รับเรื่องไว้ค่ะ")
 
     assert "ไม่ระบุในสาย" in user_prompt
     assert "แนะนำ" in user_prompt

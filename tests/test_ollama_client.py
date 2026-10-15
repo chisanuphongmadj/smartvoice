@@ -39,9 +39,15 @@ class TestNextActionOwnerFallback(unittest.TestCase):
     def _mock_chat(self, payload: dict):
         return json.dumps(payload, ensure_ascii=False)
 
-    def _run_with_response(self, mock_payload: dict):
+    def _run_with_response(self, mock_payload: dict, conversation=None):
+        # By default the call talks about money: a refund task on a call that
+        # never mentions it is rejected as ungrounded (see insight_rules).
+        conversation = conversation or [
+            {"speaker": "Customer", "text": "ขอคืนเงินค่าที่นอน 1,500 บาทค่ะ"},
+            {"speaker": "Agent", "text": "รับเรื่องไว้ค่ะ"},
+        ]
         with patch.object(ollama_client, "chat", return_value=self._mock_chat(mock_payload)):
-            return ollama_client.evaluate_agent_qa([{"speaker": "Agent", "text": "hi"}])
+            return ollama_client.evaluate_agent_qa(conversation)
 
     def test_refund_keyword_maps_to_accounting(self):
         out = self._run_with_response({
@@ -135,7 +141,7 @@ class TestNextActionOwnerFallback(unittest.TestCase):
                 "โทรแจ้งลูกค้าที่ 081-987-9336 หลังโอนเงินเรียบร้อย + บันทึกใน CRM"
             ),
             "next_action_owner": "ฝ่ายบัญชี",
-        })
+        }, conversation=[{"speaker": "Agent", "text": "hi"}])
         ap = json.loads(out["agent_performance"])
         self.assertNotIn("15,000", ap["next_action"])
         self.assertNotIn("REG0012", ap["next_action"])
@@ -368,8 +374,10 @@ class TestCorrectSpeakersRobustness(unittest.TestCase):
 
 class TestAnalyzeSentimentNormalization(unittest.TestCase):
     def _run_with(self, payload):
-        with patch.object(ollama_client, "chat", return_value=json.dumps(payload)):
-            return ollama_client.analyze_sentiment([{"speaker": "A", "text": "x"}])
+        # "positive" needs praise in the customer's own words (insight_rules).
+        payload = {"customer_quote": "ประทับใจมากค่ะ", **payload}
+        with patch.object(ollama_client, "chat", return_value=json.dumps(payload, ensure_ascii=False)):
+            return ollama_client.analyze_sentiment([{"speaker": "Customer", "text": "ประทับใจมากค่ะ"}])
 
     def test_valid_sentiment(self):
         self.assertEqual(self._run_with({"sentiment": "positive"})["sentiment"], "positive")
@@ -396,17 +404,25 @@ class TestDetectAnomalyNormalization(unittest.TestCase):
 
 
 class TestPrepareConversationText(unittest.TestCase):
-    def test_long_conversation_keeps_tail_context(self):
-        conversation = [
-            {"speaker": "Customer", "text": f"turn-{i}"}
-            for i in range(70)
-        ]
+    def test_short_conversation_is_sent_whole(self):
+        conversation = [{"speaker": "Customer", "text": f"turn-{i}"} for i in range(70)]
+        text = ollama_client._prepare_conversation_text(conversation)
+        self.assertIn("turn-35", text)
 
+    def test_long_conversation_keeps_start_and_end(self):
+        """The old cut kept the first 6,000 characters and lost the close of
+        the call — where the closing greeting and the agreed next step are."""
+        conversation = [
+            {"speaker": "Customer", "text": f"turn-{i:04d} " + "ก" * 200}
+            for i in range(200)
+        ]
         text = ollama_client._prepare_conversation_text(conversation)
 
-        self.assertIn("turn-0", text)
-        self.assertIn("turn-69", text)
-        self.assertNotIn("turn-35", text)
+        self.assertLessEqual(len(text), ollama_client.MAX_CHARS + 200)
+        self.assertIn("turn-0000", text)
+        self.assertIn("turn-0199", text)
+        self.assertNotIn("turn-0100", text)
+        self.assertIn("ตัดช่วงกลาง", text)
 
 
 class TestNormalizeTopicDetail(unittest.TestCase):

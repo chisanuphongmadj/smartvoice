@@ -16,10 +16,13 @@ of Streamlit imports so it stays unit-testable.
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 
 from smartvoice import audit, db, discord_notify
 from smartvoice.auth import normalize_role
+from smartvoice.ollama_client import sanitize_next_action
 
 STATUSES = ("open", "follow_up", "closed")
 STATUS_LABELS_TH = discord_notify.STATUS_LABELS_TH
@@ -161,3 +164,85 @@ def change_status(case_id: int, new_status: str, actor: Actor) -> tuple[bool, st
         event = discord_notify.EVENT_STATUS
     _notify(event, case_id, actor)
     return True, f"เคส #{case_id} → {STATUS_LABELS_TH[new_status]}"
+
+
+# ── Case brief — what the case is about, so staff know what they'd claim ─
+
+PRIORITY_URGENT = "ด่วนมาก"
+PRIORITY_HIGH = "ด่วน"
+PRIORITY_NORMAL = "ปกติ"
+SEVERITY_LABELS_TH = {"high": "รุนแรง", "medium": "ปานกลาง", "low": "เล็กน้อย"}
+
+# A whole next-action segment that is still the prompt's template, e.g.
+# "[บริบท/รายละเอียด]" — Typhoon sometimes copies it verbatim.
+_PLACEHOLDER_SEGMENT = re.compile(r"^[\[<].*[\]>]$")
+
+
+def next_action_steps(next_action: str) -> list[str]:
+    """Split "do X | context | deadline | how to close" into its readable parts."""
+    steps = []
+    for part in (next_action or "").split("|"):
+        part = part.strip()
+        if part and part not in {"—", "-"} and not _PLACEHOLDER_SEGMENT.match(part):
+            steps.append(part)
+    return steps
+
+
+def case_brief(calls: list[dict]) -> dict:
+    """Summarise a case from its calls (oldest-first, as `db.get_calls_for_cases` returns).
+
+    The case subject is only the first call's topic ("แจ้งปัญหาสินค้า"), which
+    says nothing about which customer problem it is. The calls already carry
+    the LLM's summary, problem type, next step and anomaly flags — this pulls
+    the latest of each together.
+    """
+    brief = {
+        "summary": "",
+        "issue": "",
+        "next_action": "",
+        "next_action_steps": [],
+        "next_action_owner": "",
+        "priority": PRIORITY_NORMAL,
+        "priority_rank": 2,
+        "anomalies": [],
+        "sentiment": "",
+    }
+    if not calls:
+        return brief
+    latest = calls[-1]
+    brief["summary"] = latest.get("summary") or ""
+    brief["sentiment"] = latest.get("sentiment") or ""
+    brief["issue"] = next(
+        (c.get("topic_detail") for c in reversed(calls) if c.get("topic_detail")),
+        latest.get("topic") or "",
+    )
+
+    try:
+        perf = json.loads(latest.get("agent_performance") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        perf = {}
+    if not isinstance(perf, dict):
+        perf = {}
+    action, owner = sanitize_next_action(
+        perf.get("next_action") or "",
+        perf.get("next_action_owner") or "",
+        latest.get("transcript") or "",
+    )
+    steps = next_action_steps(action)
+    brief["next_action_steps"] = steps
+    brief["next_action"] = steps[0] if steps else ""
+    brief["next_action_owner"] = "" if owner in {"", "ไม่มี", "—", "-"} else owner
+
+    for call in calls:
+        if call.get("anomaly_detected"):
+            brief["anomalies"].append({
+                "severity": call.get("anomaly_severity") or "",
+                "reason": call.get("anomaly_reason") or "",
+                "filename": call.get("filename") or "",
+            })
+    severities = {a["severity"] for a in brief["anomalies"]}
+    if "high" in severities:
+        brief["priority"], brief["priority_rank"] = PRIORITY_URGENT, 0
+    elif brief["anomalies"] or brief["sentiment"] == "negative":
+        brief["priority"], brief["priority_rank"] = PRIORITY_HIGH, 1
+    return brief

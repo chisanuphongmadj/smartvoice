@@ -1,13 +1,15 @@
 """Shared UI helpers for Streamlit pages — CSS, login, badges, processing launchers."""
 
+import html
+import json
+import re
 import threading
 import time
-from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 
 from smartvoice import audit as audit_trail
-from smartvoice import case_workflow, db, pipeline
+from smartvoice import case_workflow, db, labels, pipeline
 from smartvoice.auth import (
     DEFAULT_ADMIN_PASSWORD,
     DEFAULT_ADMIN_USERNAME,
@@ -39,11 +41,44 @@ section[data-testid="stSidebar"] { background-color: #1a1d27; }
     background: linear-gradient(135deg, #0b1a2b, #15243a);
     border: 1px solid #1e3a5f;
     border-radius: 12px;
-    padding: 20px;
+    padding: 18px 12px;
     text-align: center;
+    min-height: 118px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 .metric-value { font-size: 2.5rem; font-weight: 700; color: #38bdf8; }
-.metric-label { font-size: 0.85rem; color: #9ca3af; margin-top: 4px; }
+
+/* Action cards (home page): number, label and the link that acts on it, in
+   one box — a link hanging loose under a card reads as stray text. */
+div[class*="st-key-workcard"] {
+    background: linear-gradient(135deg, #0b1a2b, #15243a);
+    border: 1px solid #1e3a5f;
+    border-radius: 12px;
+    padding: 18px 14px 14px;
+}
+.work-value { font-size: 2.5rem; font-weight: 700; line-height: 1.1; text-align: center; }
+.work-label {
+    font-size: 0.9rem; color: #cbd5e1; text-align: center; margin: 4px 0 8px;
+    line-height: 1.35; height: 2.7em;  /* two lines for every card, so the row lines up */
+    display: flex; align-items: center; justify-content: center;
+}
+
+/* Shortcut links in the page body look like buttons, not plain text. */
+[data-testid="stMain"] [data-testid="stPageLink"] a {
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    background: #13233a;
+    padding: 6px 14px;
+    justify-content: center;
+    transition: background 0.15s, border-color 0.15s;
+}
+[data-testid="stMain"] [data-testid="stPageLink"] a:hover {
+    background: #1b3150;
+    border-color: #38bdf8;
+}
+.metric-label { font-size: 0.9rem; color: #cbd5e1; margin-top: 4px; line-height: 1.35; }
 .status-badge {
     display: inline-block;
     padding: 3px 10px;
@@ -231,8 +266,8 @@ def render_login_page():
             )
 
         with st.form("_login_form"):
-            username = st.text_input("Username", key="_login_username")
-            password = st.text_input("Password", type="password", key="_login_password")
+            username = st.text_input("ชื่อผู้ใช้ (Username)", key="_login_username")
+            password = st.text_input("รหัสผ่าน", type="password", key="_login_password")
             submitted = st.form_submit_button(
                 "เข้าสู่ระบบ", use_container_width=True, disabled=bool(locked_for)
             )
@@ -257,7 +292,7 @@ def render_login_page():
                     st.error(f"ผิดหลายครั้งเกินไป — ถูกล็อก {LOGIN_LOCK_SECONDS} วินาที")
                 else:
                     st.error(
-                        f"Username หรือ Password ไม่ถูกต้อง (เหลืออีก {remaining} ครั้ง)"
+                        f"ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (ลองได้อีก {remaining} ครั้ง)"
                     )
 
         if default_admin_password_unchanged():
@@ -356,7 +391,11 @@ def require_page(page_key: str) -> tuple[str, str]:
 
 
 def render_sidebar_info():
-    """Render STT/LLM info in the sidebar."""
+    """Render STT/LLM info in the sidebar — Admin only: model names mean
+    nothing to the staff who use the app day to day."""
+    _, role = get_current_user()
+    if role != "Admin":
+        return
     with st.sidebar:
         st.markdown("---")
         if MOCK_STT:
@@ -394,14 +433,13 @@ def init_page(page_key: str) -> tuple[str, str]:
 # ── Badge / emoji helpers ────────────────────────────────────────────────
 
 def sentiment_emoji(s: str) -> str:
-    return {"positive": "Positive", "neutral": "Neutral", "negative": "Negative"}.get(
-        s or "", "—"
-    )
+    """Thai word for a sentiment code (the name predates the no-emoji rule)."""
+    return labels.sentiment(s)
 
 
 def status_badge(s: str) -> str:
     cls = f"badge-{s}"
-    return f'<span class="status-badge {cls}">{s.upper()}</span>'
+    return f'<span class="status-badge {cls}">{labels.call_status(s)}</span>'
 
 
 def metric_card(value, label: str, color: str | None = None) -> str:
@@ -414,22 +452,6 @@ def metric_card(value, label: str, color: str | None = None) -> str:
 
 
 # ── Case ownership panel ─────────────────────────────────────────────────
-
-_BANGKOK = timezone(timedelta(hours=7))
-
-
-def _bangkok_time(ts: str | None) -> str:
-    """'2026-05-20T05:27:59+00:00' → '2026-05-20 12:27 น.' (Thai time)."""
-    if not ts:
-        return "-"
-    try:
-        parsed = datetime.fromisoformat(ts)
-    except ValueError:
-        return ts
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(_BANGKOK).strftime("%Y-%m-%d %H:%M น.")
-
 
 def current_case_actor() -> case_workflow.Actor:
     user, role = get_current_user()
@@ -467,11 +489,11 @@ def render_case_ownership(case: dict, key_suffix: str | int = "") -> None:
 
     if owner:
         you = " (คุณ)" if mine else ""
-        st.markdown(f"**ผู้รับเคส:** {owner}{you} — รับเมื่อ {_bangkok_time(case.get('assigned_at'))}")
+        st.markdown(f"**ผู้รับเคส:** {owner}{you} — รับเมื่อ {labels.thai_time(case.get('assigned_at'))}")
     else:
         st.markdown("**ผู้รับเคส:** ยังไม่มีคนรับ")
     if status == "closed" and case.get("closed_by"):
-        st.caption(f"ปิดเคสโดย {case['closed_by']} เมื่อ {_bangkok_time(case.get('closed_at'))}")
+        st.caption(f"ปิดเคสโดย {case['closed_by']} เมื่อ {labels.thai_time(case.get('closed_at'))}")
 
     if not owner:
         error = case_workflow.claim_error(case, actor)
@@ -508,6 +530,89 @@ def render_case_ownership(case: dict, key_suffix: str | int = "") -> None:
         if st.button(f"ปลด {owner} ออกจากเคส", key=_key("force_release"),
                      help="สำหรับหัวหน้างาน เช่น ผู้รับเคสลาออก/ลาพัก — เคสจะว่างให้คนอื่นรับ"):
             _apply(case_workflow.release(case_id, actor))
+
+
+# ── Transcript ───────────────────────────────────────────────────────────
+
+def _speaker_role(speaker: str, mapping: dict) -> str:
+    """'SPEAKER_01' / 'Speaker 1' / 'speaker_1' → the role the pipeline mapped it to."""
+    if speaker in mapping:
+        return mapping[speaker]
+    lowered = speaker.lower()
+    for key, value in mapping.items():
+        if key.lower() == lowered:
+            return value
+    nums = re.findall(r"\d+", speaker)
+    if nums:
+        n = int(nums[-1])
+        for candidate in (f"SPEAKER_{n:02d}", f"Speaker {n}", f"speaker_{n}"):
+            if candidate in mapping:
+                return mapping[candidate]
+        for key, value in mapping.items():
+            key_nums = re.findall(r"\d+", key)
+            if key_nums and int(key_nums[-1]) == n:
+                return value
+    return speaker
+
+
+def render_transcript(call: dict) -> None:
+    """The call's transcript, one line per turn, labelled [พนักงาน] / [ลูกค้า]."""
+    transcript = call.get("transcript") or ""
+    if not transcript:
+        st.caption("ยังไม่มีบทสนทนา — สายอาจยังประมวลผลไม่เสร็จ")
+        return
+    try:
+        mapping = json.loads(call.get("speaker_mapping") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        mapping = {}
+    if not isinstance(mapping, dict):
+        mapping = {}
+    # Lines look like "SPEAKER_00: ..." (needs the map) or already "Agent: ...".
+    for raw_line in transcript.splitlines():
+        if ": " not in raw_line:
+            st.markdown(html.escape(raw_line))
+            continue
+        speaker, text = raw_line.split(": ", 1)
+        role = _speaker_role(speaker.strip(), mapping)
+        color = {"Agent": "#93c5fd", "Customer": "#86efac"}.get(role, "#cbd5e1")
+        who = {"Agent": "พนักงาน", "Customer": "ลูกค้า"}.get(role)
+        if who is None:
+            # A turn diarization couldn't assign ("Speaker 0" / "SPEAKER_01").
+            nums = re.findall(r"\d+", role)
+            who = f"ไม่ทราบผู้พูด {int(nums[-1]) + 1}" if nums else role
+        # Transcript text comes from speech recognition — never let it be HTML.
+        st.markdown(
+            f'<span style="color:{color};font-weight:600">[{html.escape(who)}]</span> {html.escape(text)}',
+            unsafe_allow_html=True,
+        )
+
+
+# ── Click a table row to read it ─────────────────────────────────────────
+
+# Pass as st.dataframe(selection_mode=...). With "single-cell" a click on ANY
+# cell counts — with rows alone, only the narrow checkbox on the left selected
+# a row and a click on the text just opened Streamlit's cell overlay.
+TABLE_CLICK_MODES = ["single-row", "single-cell"]
+
+
+def picked_row(event, memory_key: str) -> tuple[int | None, bool]:
+    """(row position the user clicked, whether it is a new click).
+
+    "New" lets a page open its detail dialog once per click instead of on
+    every rerun after it; clearing the selection resets it, so clicking the
+    same row again reopens the dialog.
+    """
+    selection = event.selection
+    rows = list(selection.get("rows", []))
+    cells = [tuple(c) for c in selection.get("cells", [])]
+    row = rows[0] if rows else (cells[0][0] if cells else None)
+    if row is None:
+        st.session_state.pop(memory_key, None)
+        return None, False
+    signature = (tuple(rows), tuple(cells))
+    is_new = st.session_state.get(memory_key) != signature
+    st.session_state[memory_key] = signature
+    return row, is_new
 
 
 # ── Background processing ────────────────────────────────────────────────

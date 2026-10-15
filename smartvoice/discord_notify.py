@@ -148,7 +148,7 @@ def build_test_payload(actor: str) -> dict:
         "allowed_mentions": {"parse": []},
         "embeds": [{
             "title": "ทดสอบการแจ้งเตือน SmartVoice",
-            "description": f"**{actor}** ส่งข้อความทดสอบจากหน้า Settings — ถ้าเห็นข้อความนี้แปลว่าตั้งค่าถูกต้อง",
+            "description": f"**{actor}** ส่งข้อความทดสอบจากหน้าตั้งค่าระบบ — ถ้าเห็นข้อความนี้แปลว่าตั้งค่าถูกต้อง",
             "color": _EVENT_COLORS[EVENT_TEST],
             "fields": [{"name": "เวลา", "value": _bangkok_time(), "inline": True}],
         }],

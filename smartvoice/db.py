@@ -354,6 +354,19 @@ def count_calls_by_status() -> dict[str, int]:
     return counts
 
 
+def count_anomaly_calls() -> dict[str, int]:
+    """{'total': N, 'high': N} — analysed calls flagged as anomalies, for the
+    home page's "งานที่รอคุณ" cards (one SQL count, no rows loaded)."""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN anomaly_severity = 'high' THEN 1 ELSE 0 END) AS high
+           FROM calls WHERE status = 'done' AND anomaly_detected = 1"""
+    ).fetchone()
+    conn.close()
+    return {"total": int(row["total"] or 0), "high": int(row["high"] or 0)}
+
+
 def get_pending_call_ids() -> list[int]:
     """Return IDs of every call awaiting processing (status='uploaded').
 
@@ -1123,6 +1136,32 @@ def get_open_cases_by_customer(customer_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_calls_for_cases(case_ids: list[int]) -> dict[int, list[dict]]:
+    """{case_id: [calls oldest-first]} for a page of cases, in one query.
+
+    Lets the case list say what each case is about (summary, next step,
+    urgency) without a query per row.
+    """
+    ids = sorted({int(i) for i in case_ids})
+    if not ids:
+        return {}
+    placeholders = ", ".join("?" for _ in ids)
+    conn = get_connection()
+    rows = conn.execute(
+        f"""SELECT id, case_id, filename, summary, topic, topic_detail, sentiment,
+                   anomaly_detected, anomaly_reason, anomaly_severity,
+                   agent_performance, transcript, created_at
+            FROM calls WHERE case_id IN ({placeholders})
+            ORDER BY created_at ASC, id ASC""",
+        ids,
+    ).fetchall()
+    conn.close()
+    grouped: dict[int, list[dict]] = {case_id: [] for case_id in ids}
+    for row in rows:
+        grouped[row["case_id"]].append(dict(row))
+    return grouped
 
 
 def get_calls_by_case(case_id: int) -> list[dict]:

@@ -3,6 +3,7 @@ import os
 import re
 import requests
 
+from smartvoice import insight_rules
 from smartvoice.logger import get_logger
 
 log = get_logger(__name__)
@@ -26,7 +27,22 @@ def _normalize_llm_output(raw: str) -> str:
     return raw.strip()
 
 
-def chat(system_prompt: str, user_prompt: str, *, temperature: float = 0) -> str:
+def _num_ctx() -> int:
+    """Context window sent with every request.
+
+    Ollama silently drops the *start* of a prompt that exceeds its context
+    window, and its default differs between installs (2048-8192). The QA
+    prompt plus a long call needs ~8k tokens, so it is set explicitly.
+    """
+    try:
+        return max(4096, int(os.getenv("OLLAMA_NUM_CTX", "12288")))
+    except ValueError:
+        return 12288
+
+
+def chat(
+    system_prompt: str, user_prompt: str, *, temperature: float = 0, json_mode: bool = False
+) -> str:
     url = f"{_base_url()}/api/chat"
     payload = {
         "model": _model(),
@@ -35,8 +51,15 @@ def chat(system_prompt: str, user_prompt: str, *, temperature: float = 0) -> str
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "options": {"temperature": temperature},
+        "options": {"temperature": temperature, "num_ctx": _num_ctx()},
     }
+    if json_mode:
+        # Constrains decoding to a JSON object — no prose around it to strip.
+        payload["format"] = "json"
+        # Cap the answer: in JSON mode the model sometimes repeats list items
+        # until the 600 s timeout (one real QA request hung for 10 minutes).
+        # Every analysis answer fits well inside this.
+        payload["options"]["num_predict"] = 1500
     response = requests.post(url, json=payload, timeout=600)
     response.raise_for_status()
     data = response.json()
@@ -181,10 +204,12 @@ def cleanup_transcript(conversation: list[dict]) -> list[dict]:
         return conversation
 
 
-MAX_SEGMENTS = 60
-MAX_CHARS = 6000
-HEAD_SEGMENTS = 30
-TAIL_SEGMENTS = MAX_SEGMENTS - HEAD_SEGMENTS
+# ~7k tokens of Thai; with the longest prompt this stays inside _num_ctx().
+MAX_CHARS = 14000
+# When a call is longer, keep its opening and its ending (greeting, problem,
+# and what was agreed at the close) and drop the middle.
+HEAD_SHARE = 0.4
+_ELLIPSIS_LINE = "...(ตัดช่วงกลางของบทสนทนาออกเพราะยาวเกิน)..."
 
 
 def _normalize_bool(value) -> bool:
@@ -255,9 +280,15 @@ def _fallback_next_action_from_conversation(conversation_text: str) -> tuple[str
 def sanitize_next_action(
     next_action: str, next_action_owner: str, conversation_text: str
 ) -> tuple[str, str]:
+    """Also used at display time, so rows saved by older prompts get cleaned too."""
     if _looks_like_copied_next_action_example(next_action or "", conversation_text or ""):
         return _fallback_next_action_from_conversation(conversation_text or "")
-    return next_action, next_action_owner
+    if insight_rules.money_action_is_ungrounded(next_action or "", conversation_text or ""):
+        log.warning("next_action mentions a refund on a call with no money talk — replacing")
+        return _fallback_next_action_from_conversation(conversation_text or "")
+    if (next_action or "").startswith("ไม่มี"):
+        return next_action, next_action_owner
+    return insight_rules.clean_next_action_text(next_action) or next_action, next_action_owner
 
 
 # Placeholder fragments that Typhoon-8B has been observed copying verbatim from
@@ -358,22 +389,41 @@ def sanitize_evidence(evidence: str, conversation_text: str = "") -> str:
 
 
 def _prepare_conversation_text(conversation) -> str:
-    """Convert conversation list/str to capped text for LLM prompts."""
+    """Conversation list/str → "Speaker: text" lines within MAX_CHARS.
+
+    Over budget, the middle is dropped on line boundaries — the old cut kept
+    only the first 6,000 characters, losing the close of 4 in 11 real calls
+    (the closing greeting and what was agreed are scored from the end).
+    """
     if isinstance(conversation, list):
-        all_segs = [item for item in conversation if item.get("text")]
-        if len(all_segs) > MAX_SEGMENTS:
-            segs = all_segs[:HEAD_SEGMENTS] + all_segs[-TAIL_SEGMENTS:]
-        else:
-            segs = all_segs[:MAX_SEGMENTS]
-        text = "\n".join(
+        lines = [
             f"{item.get('speaker', 'Unknown')}: {item.get('text', '')}"
-            for item in segs
-        )
+            for item in conversation
+            if item.get("text")
+        ]
     else:
-        text = str(conversation)
-    if len(text) > MAX_CHARS:
-        text = text[:MAX_CHARS] + "\n...(ตัดบทสนทนาที่เกินมา)"
-    return text
+        lines = str(conversation).splitlines()
+    text = "\n".join(lines)
+    if len(text) <= MAX_CHARS:
+        return text
+
+    head_budget = int(MAX_CHARS * HEAD_SHARE)
+    tail_budget = MAX_CHARS - head_budget
+    head, used = [], 0
+    for line in lines:
+        if used + len(line) + 1 > head_budget:
+            break
+        head.append(line)
+        used += len(line) + 1
+    tail, used = [], 0
+    for line in reversed(lines[len(head):]):
+        if used + len(line) + 1 > tail_budget:
+            break
+        tail.append(line)
+        used += len(line) + 1
+    if not head and not tail:  # one enormous line
+        return text[:head_budget] + "\n" + _ELLIPSIS_LINE + "\n" + text[-tail_budget:]
+    return "\n".join(head + [_ELLIPSIS_LINE] + list(reversed(tail)))
 
 
 # Allowed topic_detail values when topic = "แจ้งปัญหาสินค้า". Kept in sync with
@@ -386,18 +436,22 @@ TOPIC_DETAIL_CHOICES = (
     "เปื้อน/รอยขีดข่วน",
     "ความชื้น/น้ำท่วม",
     "ขนาด/สเปคผิด",
+    "กลิ่น/แพ้/ระคายเคือง",
     "อื่นๆ",
 )
 _TOPIC_DETAIL_FALLBACK = "อื่นๆ"
 # Stem keywords used to snap LLM rewordings back to the canonical label.
 # Order matters: first hit wins, so put more specific stems before generic ones.
+# Stems are whole words on purpose: the old bare "รา" matched "รายละเอียด"
+# and "ผ้า" matched "ผ้าห่ม", snapping unrelated answers onto those labels.
 _TOPIC_DETAIL_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("กลิ่น/แพ้/ระคายเคือง", ("แพ้", "ผื่น", "คัน", "แสบ", "ระคายเคือง", "กลิ่น", "สารเคมี")),
     ("เปื้อน/รอยขีดข่วน",   ("เปื้อน", "คราบ", "รอยขีด", "ขีดข่วน", "รอยถลอก")),
-    ("ความชื้น/น้ำท่วม",    ("เชื้อรา", "ชื้น", "น้ำท่วม", "อับชื้น", "รา")),
+    ("ความชื้น/น้ำท่วม",    ("เชื้อรา", "ราขึ้น", "ความชื้น", "อับชื้น", "น้ำท่วม", "น้ำหก")),
     ("สปริง/ฟองน้ำยุบ",     ("สปริง", "ฟองน้ำ", "ยุบ", "เป็นแอ่ง")),
     ("เตียง/โครงหัก",       ("เตียงหัก", "โครงเตียง", "โครงหัก", "ขาเตียง", "หัวเตียง")),
-    ("ผ้าขาด/ผ้าหุ้มชำรุด", ("ผ้าขาด", "ผ้าหุ้ม", "ปลอก", "ผ้าฉีก", "ผ้า")),
-    ("ขนาด/สเปคผิด",        ("ขนาดไม่ตรง", "ผิดรุ่น", "สเปคผิด", "สีผิด", "ผิดสเปค", "ไม่ตรงปก")),
+    ("ผ้าขาด/ผ้าหุ้มชำรุด", ("ผ้าขาด", "ผ้าหุ้ม", "ปลอก", "ผ้าฉีก", "ผ้ารอง")),
+    ("ขนาด/สเปคผิด",        ("ขนาดไม่ตรง", "ผิดรุ่น", "สเปคผิด", "สีผิด", "ผิดสเปค", "ไม่ตรงปก", "ไม่ครบ", "ไม่ตรงที่สั่ง", "สีไม่ตรง", "รุ่นไม่ตรง", "ขนาดผิด")),
 )
 
 
@@ -431,15 +485,23 @@ def extract_summary_and_topics(conversation) -> dict:
     text = _prepare_conversation_text(conversation)
     system, user = build_extraction_prompt(text)
     try:
-        result = extract_json(chat(system, user))
+        result = extract_json(chat(system, user, json_mode=True))
     except Exception:
         log.exception("extract_summary_and_topics: LLM call/parse failed — using empty defaults")
         result = {}
 
     keywords = result.get("keywords", [])
-    brand_mentions = result.get("brand_mentions", [])
-    platform_mentions = result.get("platform_mentions", [])
-    topic = result.get("topic", "")
+    keywords = [k.strip() for k in keywords if isinstance(k, str) and k.strip()][:8] if isinstance(keywords, list) else []
+    # Only names actually said in the call, one spelling each (the model used
+    # to list the group's five brands from the prompt on calls that never
+    # mentioned them, and "Lotus", "โลตัส", "Lotus/โลตัส" split the chart).
+    brand_mentions = insight_rules.canonical_mentions(
+        result.get("brand_mentions", []), text, insight_rules.BRAND_ALIASES
+    )
+    platform_mentions = insight_rules.canonical_mentions(
+        result.get("platform_mentions", []), text, insight_rules.PLATFORM_ALIASES
+    )
+    topic = insight_rules.normalize_topic(result.get("topic", "")) if result.get("topic") else ""
     topic_detail = normalize_topic_detail(topic, result.get("topic_detail", ""))
 
     return {
@@ -459,18 +521,29 @@ def analyze_sentiment(conversation) -> dict:
     text = _prepare_conversation_text(conversation)
     system, user = build_sentiment_prompt(text)
     try:
-        result = extract_json(chat(system, user))
+        result = extract_json(chat(system, user, json_mode=True))
     except Exception:
         log.exception("analyze_sentiment: LLM call/parse failed — defaulting to neutral")
         result = {}
 
-    sentiment = result.get("sentiment", "neutral").lower()
+    sentiment = str(result.get("sentiment") or "neutral").strip().lower()
     if sentiment not in ("positive", "neutral", "negative"):
         sentiment = "neutral"
 
+    reason = " ".join(str(result.get("sentiment_reason") or "").split())
+    quote = " ".join(str(result.get("customer_quote") or "").split())
+    customer_text = insight_rules.speaker_text(text, "Customer")
+    if not insight_rules.quote_in_text(quote, customer_text):
+        quote = ""
+    sentiment = insight_rules.check_sentiment(sentiment, quote, customer_text)
+    if quote:
+        # Show the customer's own words next to the label — only when they
+        # really occur in what the customer said.
+        reason = f"{reason} — ลูกค้าพูดว่า: \"{quote}\"" if reason else f"ลูกค้าพูดว่า: \"{quote}\""
+
     return {
         "sentiment": sentiment,
-        "sentiment_reason": result.get("sentiment_reason", ""),
+        "sentiment_reason": reason,
     }
 
 
@@ -510,17 +583,47 @@ def evaluate_agent_qa(conversation) -> dict:
     text = _prepare_conversation_text(conversation)
     system, user = build_agent_qa_prompt(text)
     try:
-        result = extract_json(chat(system, user, temperature=0.3))
+        # temperature 0: the same call must get the same score when re-processed.
+        result = extract_json(chat(system, user, json_mode=True))
     except Exception:
         log.exception("evaluate_agent_qa: LLM call/parse failed — defaulting to mid scores")
         result = {}
 
-    politeness = _coerce_score(result.get("politeness"), default=3)
-    problem_solving = _coerce_score(result.get("problem_solving"), default=3)
+    if insight_rules.has_itemised_qa(result):
+        # Scores computed here from items whose quotes the agent really said —
+        # the model's own totals came out 5/5 on every call.
+        items = insight_rules.items_from_answer(result)
+        politeness, politeness_evidence = insight_rules.score_items(
+            items, insight_rules.POLITENESS_ITEMS, text
+        )
+        problem_solving, problem_solving_evidence = insight_rules.score_items(
+            items, insight_rules.PROBLEM_SOLVING_ITEMS, text
+        )
+    else:  # older answer format: {"politeness": n, "politeness_evidence": "..."}
+        politeness = _coerce_score(result.get("politeness"), default=3)
+        problem_solving = _coerce_score(result.get("problem_solving"), default=3)
+        politeness_evidence = sanitize_evidence(result.get("politeness_evidence", ""), text)
+        problem_solving_evidence = sanitize_evidence(result.get("problem_solving_evidence", ""), text)
     overall_score = politeness + problem_solving
 
-    next_action_owner = result.get("next_action_owner") or "ไม่มี"
-    next_action = result.get("next_action") or "ไม่มี — เคสปิดสมบูรณ์"
+    # The next step is its own request (see prompts.NEXT_ACTION_USER): asked
+    # alongside the checklist, the model marked plainly open calls as closed.
+    from smartvoice.prompts import build_next_action_prompt
+
+    try:
+        na_system, na_user = build_next_action_prompt(text)
+        next_answer = extract_json(chat(na_system, na_user, json_mode=True))
+    except Exception:
+        log.exception("evaluate_agent_qa: next-action call failed — using the QA answer")
+        next_answer = {}
+    structured = insight_rules.build_next_action(next_answer, text) or insight_rules.build_next_action(
+        result.get("next_action"), text
+    )
+    if structured:
+        next_action, next_action_owner = structured
+    else:
+        next_action_owner = result.get("next_action_owner") or "ไม่มี"
+        next_action = result.get("next_action") or insight_rules.CLOSED_NEXT_ACTION
     if _looks_like_copied_next_action_example(next_action, text):
         next_action, next_action_owner = _fallback_next_action_from_conversation(text)
     else:
@@ -547,9 +650,9 @@ def evaluate_agent_qa(conversation) -> dict:
 
     agent_perf = {
         "politeness": politeness,
-        "politeness_evidence": sanitize_evidence(result.get("politeness_evidence", ""), text),
+        "politeness_evidence": politeness_evidence,
         "problem_solving": problem_solving,
-        "problem_solving_evidence": sanitize_evidence(result.get("problem_solving_evidence", ""), text),
+        "problem_solving_evidence": problem_solving_evidence,
         "overall_score": overall_score,
         "next_action": next_action,
         "next_action_owner": next_action_owner,
@@ -568,20 +671,14 @@ def detect_anomaly(conversation) -> dict:
     text = _prepare_conversation_text(conversation)
     system, user = build_anomaly_prompt(text)
     try:
-        result = extract_json(chat(system, user))
+        result = extract_json(chat(system, user, json_mode=True))
     except Exception:
         log.exception("detect_anomaly: LLM call/parse failed — defaulting to no anomaly")
         result = {}
 
-    severity = result.get("anomaly_severity") or ""
-    if severity not in ("low", "medium", "high"):
-        severity = ""
-
-    return {
-        "anomaly_detected": _normalize_bool(result.get("anomaly_detected", False)),
-        "anomaly_reason": result.get("anomaly_reason") or "",
-        "anomaly_severity": severity,
-    }
+    # Flag only with a quote that occurs in the call and carries a keyword of
+    # its category; severity follows the category (insight_rules).
+    return insight_rules.verify_anomaly(result, text)
 
 
 def analyze_transcript(conversation) -> dict:
@@ -600,13 +697,15 @@ def analyze_transcript(conversation) -> dict:
     }
 
 
-def match_case(new_topic: str, new_summary: str, existing_cases: list[dict]) -> dict:
+def match_case(
+    new_topic: str, new_summary: str, existing_cases: list[dict], new_call_at: str | None = None
+) -> dict:
     """Call LLM to decide if a new call belongs to an existing case or needs a new one."""
     from smartvoice.prompts import build_case_match_prompt
 
-    system, user = build_case_match_prompt(new_topic, new_summary, existing_cases)
+    system, user = build_case_match_prompt(new_topic, new_summary, existing_cases, new_call_at)
     try:
-        result = extract_json(chat(system, user))
+        result = extract_json(chat(system, user, json_mode=True))
     except Exception:
         log.exception("match_case: LLM call/parse failed — creating new case instead")
         result = {}
