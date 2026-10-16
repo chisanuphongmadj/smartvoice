@@ -6,6 +6,7 @@ streamlit>=1.55.0,<2.0.0
 plotly>=6.0.0,<7.0.0
 pandas>=2.3.0,<3.0.0
 matplotlib>=3.10.0,<4.0.0
+openpyxl>=3.1.0,<4.0.0          # Excel import/export of sales orders
 
 # ── Config / HTTP ──────────────────────────────────
 python-dotenv>=1.2.0,<2.0.0

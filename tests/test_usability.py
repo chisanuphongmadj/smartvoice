@@ -243,12 +243,31 @@ def test_a_click_on_any_cell_picks_its_row_and_opens_once():
         assert ui_helpers.picked_row(_click(cells=[(2, "สรุปสาย")]), "k") == (2, True)
         # The rerun after it must not pop the dialog open again.
         assert ui_helpers.picked_row(_click(cells=[(2, "สรุปสาย")]), "k") == (2, False)
-        # Another cell, or the row checkbox, is a new click.
+        # Another cell (or a row, should a table select rows) is a new click.
         assert ui_helpers.picked_row(_click(cells=[(2, "หัวข้อ")]), "k") == (2, True)
         assert ui_helpers.picked_row(_click(rows=[0]), "k") == (0, True)
         # Clearing the selection resets, so the same cell opens again later.
         assert ui_helpers.picked_row(_click(), "k") == (None, False)
         assert ui_helpers.picked_row(_click(rows=[0]), "k") == (0, True)
+
+
+def test_deselecting_never_reopens_the_dialog():
+    """Un-ticking a row while its clicked cell stayed selected used to count as
+    a new click and pop the dialog open again."""
+    from smartvoice import ui_helpers
+
+    state: dict = {}
+    with mock.patch.object(ui_helpers, "st", types.SimpleNamespace(session_state=state)):
+        assert ui_helpers.picked_row(_click(rows=[1], cells=[(1, "ชื่อ")]), "k") == (1, True)
+        # Box un-ticked, cell still selected: a removal, not a click.
+        assert ui_helpers.picked_row(_click(cells=[(1, "ชื่อ")]), "k") == (1, False)
+
+
+def test_tables_have_no_checkbox_column():
+    from smartvoice import ui_helpers
+
+    # Row selection draws a checkbox per row; a click on any cell is enough.
+    assert ui_helpers.TABLE_CLICK_MODES == ["single-cell"]
 
 
 def test_tables_with_long_text_open_a_dialog_on_click():

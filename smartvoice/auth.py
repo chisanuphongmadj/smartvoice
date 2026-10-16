@@ -58,6 +58,7 @@ PAGE_AGENT_PERFORMANCE = "agent_performance"  # Dashboard → ผลงาน Ag
 PAGE_CALLS = "calls"                    # Dashboard → รายการสาย
 PAGE_CASES = "cases"                    # จัดการเคส (รับเคส / ปิดเคส)
 PAGE_CUSTOMERS = "customers"
+PAGE_SALES_ORDERS = "sales_orders"     # ใบสั่งขาย (SO)
 PAGE_DATA_ENTRY = "data_entry"
 PAGE_AUDIT = "audit"
 PAGE_SETTINGS = "settings"
@@ -74,6 +75,7 @@ PAGE_ORDER = (
     PAGE_CALLS,
     PAGE_CASES,
     PAGE_CUSTOMERS,
+    PAGE_SALES_ORDERS,
     PAGE_DATA_ENTRY,
     PAGE_AUDIT,
     PAGE_SETTINGS,
@@ -101,6 +103,7 @@ PAGE_LABELS_TH = {
     PAGE_CALLS: "Dashboard — รายการสาย",
     PAGE_CASES: "จัดการเคส",
     PAGE_CUSTOMERS: "ลูกค้าและการรับประกัน",
+    PAGE_SALES_ORDERS: "ใบสั่งขาย (SO)",
     PAGE_DATA_ENTRY: "เพิ่ม/แก้ไขข้อมูลลูกค้า",
     PAGE_AUDIT: "ประวัติการใช้งาน",
     PAGE_SETTINGS: "ตั้งค่าระบบ",
@@ -118,6 +121,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             *DASHBOARD_PAGES,
             PAGE_CASES,
             PAGE_CUSTOMERS,
+            PAGE_SALES_ORDERS,
             PAGE_DATA_ENTRY,
             PAGE_AUDIT,
             PAGE_SETTINGS,
@@ -131,12 +135,13 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             *DASHBOARD_PAGES,
             PAGE_CASES,
             PAGE_CUSTOMERS,
+            PAGE_SALES_ORDERS,
             PAGE_AUDIT,
             PAGE_SETTINGS,
         }
     ),
-    "QA": frozenset({PAGE_HOME, *DASHBOARD_PAGES, PAGE_CASES, PAGE_CUSTOMERS}),
-    "Agent": frozenset({PAGE_HOME, *DASHBOARD_PAGES, PAGE_CASES, PAGE_CUSTOMERS}),
+    "QA": frozenset({PAGE_HOME, *DASHBOARD_PAGES, PAGE_CASES, PAGE_CUSTOMERS, PAGE_SALES_ORDERS}),
+    "Agent": frozenset({PAGE_HOME, *DASHBOARD_PAGES, PAGE_CASES, PAGE_CUSTOMERS, PAGE_SALES_ORDERS}),
 }
 
 # Anything we don't recognise falls back to the least-privileged role.

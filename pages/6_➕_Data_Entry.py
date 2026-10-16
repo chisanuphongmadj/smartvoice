@@ -7,9 +7,9 @@ st.set_page_config(page_title="SmartVoice — เพิ่ม/แก้ไขข
 
 from datetime import date
 
-from smartvoice import customer_entry, db, labels
+from smartvoice import customer_entry, db, file_manager, labels
 from smartvoice.auth import PAGE_DATA_ENTRY
-from smartvoice.ui_helpers import init_page
+from smartvoice.ui_helpers import init_page, render_proof
 
 # Admin only (see smartvoice.auth.ROLE_PERMISSIONS).
 current_user, current_role = init_page(PAGE_DATA_ENTRY)
@@ -99,6 +99,8 @@ with tab_customer:
                 last_name = st.text_input("นามสกุล *", placeholder="ใจดี")
                 phone = st.text_input("เบอร์โทร", placeholder="0812345678")
                 email = st.text_input("อีเมล", placeholder="somchai@email.com")
+                nick_name = st.text_input("ชื่อเล่น")
+                cust_channel = st.selectbox("ช่องทาง (แบรนด์ที่ลูกค้าติดต่อ)", (_NONE, *customer_entry.CHANNELS))
                 gender = st.selectbox("เพศ", (_NONE, *customer_entry.GENDERS))
                 dob = st.date_input(
                     "วันเกิด",
@@ -129,6 +131,8 @@ with tab_customer:
                 last_name=last_name,
                 phone=phone,
                 email=email,
+                nick_name=nick_name,
+                channel=None if cust_channel == _NONE else cust_channel,
                 gender=None if gender == _NONE else gender,
                 date_of_birth=dob,
                 address=address,
@@ -180,6 +184,15 @@ with tab_customer:
                     ed_last = st.text_input("นามสกุล *", value=picked["last_name"])
                     ed_phone = st.text_input("เบอร์โทร", value=picked["phone"] or "")
                     ed_email = st.text_input("อีเมล", value=picked["email"] or "")
+                    ed_nick = st.text_input("ชื่อเล่น", value=picked.get("nick_name") or "")
+                    channels = (_NONE, *customer_entry.CHANNELS)
+                    if picked.get("channel") and picked["channel"] not in channels:
+                        channels = (*channels, picked["channel"])
+                    ed_cust_channel = st.selectbox(
+                        "ช่องทาง (แบรนด์ที่ลูกค้าติดต่อ)",
+                        channels,
+                        index=channels.index(picked["channel"]) if picked.get("channel") in channels else 0,
+                    )
                     genders = (_NONE, *customer_entry.GENDERS)
                     ed_gender = st.selectbox(
                         "เพศ",
@@ -215,6 +228,8 @@ with tab_customer:
                     last_name=ed_last,
                     phone=ed_phone,
                     email=ed_email,
+                    nick_name=ed_nick,
+                    channel=None if ed_cust_channel == _NONE else ed_cust_channel,
                     gender=None if ed_gender == _NONE else ed_gender,
                     date_of_birth=ed_dob,
                     address=ed_address,
@@ -307,7 +322,9 @@ with tab_warranty:
                 purchase_channel = _pick_with_other(
                     "ช่องทางซื้อ", customer_entry.PURCHASE_CHANNELS, "_w_purchase_channel"
                 )
-                order_number = st.text_input("เลขที่คำสั่งซื้อ", placeholder="SP2506011")
+                order_number = st.text_input("เลขที่คำสั่งซื้อ (ร้านค้า/marketplace)")
+                so_number = st.text_input("เลขที่ SO", help="ใบสั่งขายของบริษัท — ดูรายละเอียดได้ที่เมนู ใบสั่งขาย (SO)")
+                ref_id = st.text_input("Ref Id", help="เลขอ้างอิงจากระบบลงทะเบียนรับประกัน")
                 warranty_period_months = st.number_input(
                     "ระยะเวลารับประกัน (เดือน)", min_value=0, max_value=600, value=120, step=12
                 )
@@ -323,31 +340,43 @@ with tab_warranty:
                 expiry_date = st.date_input("วันหมดประกัน", value=None, format="YYYY-MM-DD")
 
             remark = st.text_area("หมายเหตุ", height=80)
+            proof = st.file_uploader(
+                "หลักฐานการซื้อ (ใบเสร็จ/สลิป) — รูป JPG/PNG/WEBP หรือ PDF ไม่เกิน 10 MB",
+                type=["jpg", "jpeg", "png", "webp", "pdf"],
+                key="_w_proof",
+            )
 
             st.caption("* จำเป็นต้องกรอก — เลขทะเบียนต้องไม่ซ้ำกับรายการเดิม")
             if st.button("บันทึกทะเบียนรับประกัน", use_container_width=True):
-                new_id, error = customer_entry.create_warranty(
-                    actor=current_user,
-                    actor_role=current_role,
-                    registration_no=registration_no,
-                    customer_id=customer_id,
-                    channel=channel,
-                    certificate_no=certificate_no,
-                    category=category,
-                    brand=brand,
-                    model=model,
-                    size=size,
-                    sku=sku,
-                    serial_no=serial_no,
-                    label_no=label_no,
-                    warranty_period_months=warranty_period_months,
-                    date_of_purchase=date_of_purchase,
-                    date_of_delivery=date_of_delivery,
-                    purchase_channel=purchase_channel,
-                    order_number=order_number,
-                    expiry_date=None if use_auto else expiry_date,
-                    remark=remark,
-                )
+                proof_path, error = (None, None)
+                if proof is not None:
+                    proof_path, error = file_manager.save_proof_file(proof.getvalue())
+                if not error:
+                    new_id, error = customer_entry.create_warranty(
+                        actor=current_user,
+                        actor_role=current_role,
+                        registration_no=registration_no,
+                        customer_id=customer_id,
+                        channel=channel,
+                        certificate_no=certificate_no,
+                        category=category,
+                        brand=brand,
+                        model=model,
+                        size=size,
+                        sku=sku,
+                        serial_no=serial_no,
+                        label_no=label_no,
+                        warranty_period_months=warranty_period_months,
+                        date_of_purchase=date_of_purchase,
+                        date_of_delivery=date_of_delivery,
+                        purchase_channel=purchase_channel,
+                        order_number=order_number,
+                        so_number=so_number,
+                        ref_id=ref_id,
+                        proof_path=proof_path,
+                        expiry_date=None if use_auto else expiry_date,
+                        remark=remark,
+                    )
                 if error:
                     st.error(error)
                 else:
@@ -436,7 +465,14 @@ with tab_warranty:
                         f"_ew_purchase_{wid}", picked_w["purchase_channel"],
                     )
                     ed_order = st.text_input(
-                        "เลขที่คำสั่งซื้อ", value=picked_w["order_number"] or "", key=f"_ew_order_{wid}"
+                        "เลขที่คำสั่งซื้อ (ร้านค้า/marketplace)", value=picked_w["order_number"] or "",
+                        key=f"_ew_order_{wid}",
+                    )
+                    ed_so = st.text_input(
+                        "เลขที่ SO", value=picked_w.get("so_number") or "", key=f"_ew_so_{wid}"
+                    )
+                    ed_ref = st.text_input(
+                        "Ref Id", value=picked_w.get("ref_id") or "", key=f"_ew_ref_{wid}"
                     )
                     ed_months = st.number_input(
                         "ระยะเวลารับประกัน (เดือน)",
@@ -468,35 +504,84 @@ with tab_warranty:
                 ed_remark = st.text_area(
                     "หมายเหตุ", value=picked_w["remark"] or "", height=80, key=f"_ew_remark_{wid}"
                 )
+                proof_col, upload_col = st.columns([1, 2])
+                with proof_col:
+                    st.markdown("**หลักฐานการซื้อปัจจุบัน**")
+                    render_proof(picked_w.get("proof_path"), key=f"_ew_proof_view_{wid}")
+                with upload_col:
+                    ed_proof = st.file_uploader(
+                        "อัปโหลดหลักฐานใหม่ (แทนที่ไฟล์เดิม) — JPG/PNG/WEBP/PDF ไม่เกิน 10 MB",
+                        type=["jpg", "jpeg", "png", "webp", "pdf"],
+                        key=f"_ew_proof_{wid}",
+                    )
 
                 if st.button("บันทึกการแก้ไข", key=f"_save_w_{wid}", use_container_width=True):
-                    error = customer_entry.update_warranty(
-                        wid,
-                        actor=current_user,
-                        actor_role=current_role,
-                        registration_no=ed_reg,
-                        customer_id=cust_map[ed_owner],
-                        channel=ed_channel,
-                        certificate_no=ed_cert,
-                        category=ed_category,
-                        brand=ed_brand,
-                        model=ed_model,
-                        size=ed_size,
-                        sku=ed_sku,
-                        serial_no=ed_serial,
-                        label_no=ed_label,
-                        warranty_period_months=ed_months,
-                        date_of_purchase=ed_purchase_date,
-                        date_of_delivery=ed_delivery_date,
-                        purchase_channel=ed_purchase_channel,
-                        order_number=ed_order,
-                        expiry_date=None if ed_use_auto else ed_expiry,
-                        remark=ed_remark,
-                    )
+                    ed_proof_path, error = (picked_w.get("proof_path"), None)
+                    if ed_proof is not None:
+                        ed_proof_path, error = file_manager.save_proof_file(ed_proof.getvalue())
+                    if not error:
+                        error = customer_entry.update_warranty(
+                            wid,
+                            actor=current_user,
+                            actor_role=current_role,
+                            registration_no=ed_reg,
+                            customer_id=cust_map[ed_owner],
+                            channel=ed_channel,
+                            certificate_no=ed_cert,
+                            category=ed_category,
+                            brand=ed_brand,
+                            model=ed_model,
+                            size=ed_size,
+                            sku=ed_sku,
+                            serial_no=ed_serial,
+                            label_no=ed_label,
+                            warranty_period_months=ed_months,
+                            date_of_purchase=ed_purchase_date,
+                            date_of_delivery=ed_delivery_date,
+                            purchase_channel=ed_purchase_channel,
+                            order_number=ed_order,
+                            so_number=ed_so,
+                            ref_id=ed_ref,
+                            proof_path=ed_proof_path,
+                            expiry_date=None if ed_use_auto else ed_expiry,
+                            remark=ed_remark,
+                        )
                     if error:
                         st.error(error)
                     else:
                         _flash_and_rerun(f"บันทึกการแก้ไขทะเบียน **{ed_reg.strip()}** เรียบร้อยแล้ว")
+
+                status_now = picked_w.get("status") or "active"
+                st.markdown(f"**สถานะทะเบียน: {labels.warranty_status(status_now)}**")
+                if status_now == "cancelled":
+                    st.caption(
+                        f"ยกเลิกโดย {picked_w.get('cancelled_by') or '-'} "
+                        f"เมื่อ {labels.thai_time(picked_w.get('cancelled_at'))}"
+                    )
+                st.caption(
+                    "ยกเลิก (Cancel) = ทะเบียนยังแสดงอยู่พร้อมสถานะยกเลิก เช่น ลูกค้าคืนสินค้า "
+                    "— ต่างจากการลบ ซึ่งซ่อนทะเบียนออกจากทุกหน้า"
+                )
+                target_status = "active" if status_now == "cancelled" else "cancelled"
+                confirm_status = st.checkbox(
+                    f"ยืนยัน{'เปิดใช้ทะเบียนนี้อีกครั้ง' if target_status == 'active' else 'ยกเลิกทะเบียนนี้'}",
+                    key=f"_confirm_status_w_{wid}",
+                )
+                if st.button(
+                    "เปิดใช้อีกครั้ง (Active)" if target_status == "active" else "ยกเลิกทะเบียน (Cancel)",
+                    key=f"_status_w_{wid}",
+                    disabled=not confirm_status,
+                ):
+                    error = customer_entry.set_warranty_status(
+                        wid, target_status, actor=current_user, actor_role=current_role
+                    )
+                    if error:
+                        st.error(error)
+                    else:
+                        _flash_and_rerun(
+                            f"เปลี่ยนสถานะทะเบียน `{picked_w['registration_no']}` เป็น "
+                            f"{labels.warranty_status(target_status)} แล้ว"
+                        )
 
                 st.markdown("**ลบทะเบียนรับประกัน (ซ่อนไว้ — กู้คืนได้)**")
                 st.caption(

@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 408 tests, must pass 100% before every commit.
+**Current test baseline:** 471 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -45,14 +45,17 @@ ollama serve
 | File | Role |
 |------|------|
 | `config.py` | Single source of truth for all env vars |
-| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)`. Also holds the append-only `audit_log` table. Customer/warranty edits go through `update_customer()` / `update_warranty()` (column whitelists); deletes are `soft_delete_*()` / `restore_*()` — see **Soft delete + audit trail** |
+| `db.py` | SQLite schema, migrations, CRUD (tables: `calls`, `customers`, `warranty_registrations`, `call_customer_links`, `cases`, `users`, `sales_orders`, `sales_order_lines`). Scale-friendly helpers: `count_calls_by_status()`, `get_pending_call_ids()`, `get_processing_calls()`, `get_all_calls(limit=N)`. Also holds the append-only `audit_log` table. Customer/warranty edits go through `update_customer()` / `update_warranty()` (column whitelists); deletes are `soft_delete_*()` / `restore_*()` — see **Soft delete + audit trail** |
 | `pipeline.py` | Core orchestrator — speaker correction multi-pass, case assignment (~70 KB) |
 | `prompts.py` | All LLM prompt templates (~54 KB) |
 | `ollama_client.py` | LLM client + JSON extraction; 4 separate analysis calls. Includes `normalize_topic_detail()` for the product-issue drill-down vocabulary |
 | `file_manager.py` | Audio upload + SHA-256 deduplication. Filename helpers: `extract_phone_from_filename()`, `extract_direction_from_filename()` (Inbound/Outbound), `extract_agent_code_from_filename()` |
 | `env_settings.py` | `.env` read/write + UI helpers: `gpu_available()`, `gpu_device_name()`, `validate_whisper_combo()` (model/backend/device/compute compatibility), `recommended_combo_for_model()` (auto-apply on model change) |
 | `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
-| `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths); writes its own audit entries through `audit.record()` — no Streamlit import, so it is unit-testable |
+| `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths); writes its own audit entries through `audit.record()` — no Streamlit import, so it is unit-testable. Also `set_warranty_status()` (Active/Cancel) |
+| `sales_orders.py` | Sales orders (SO): `FIELDS` (Thai template header + NAV English aliases per column), `read_upload()` (xlsx/csv, finds the header row, cp874 fallback), `parse_import()` (one row per line → orders grouped by SO number, row-numbered errors), value parsers (พ.ศ. dates, `1,234.50`, Excel-stripped leading 0), `complete_totals()`, `import_orders()` (upsert + one `import` audit entry), `save_manual()` / `hide()` / `restore()` / `link_customer()`, `template_bytes()`. No Streamlit import — see **Sales orders (SO)** |
+| `customer_view.py` | Customers page tables (`customer_rows`, `warranty_rows`, warranty state/expiry) and `render_customer_detail()` — the dialog opened by clicking a customer or warranty row |
+| `so_view.py` | Streamlit rendering of an SO laid out like the company's "ใบสั่งขาย" — used by the SO page, the Customers page and the Cases dialog (`render_customer_orders()`) |
 | `insight_rules.py` | Deterministic checks on every LLM answer before it is saved — quote verification, QA scoring, next-action assembly, sentiment guard, anomaly verification + keyword backstop, brand/platform canonicalisation, topic clamping. See **LLM analysis** |
 | `audit.py` | Audit-trail vocabulary + `record()` — action/entity constants, Thai labels, secret redaction, `diff_fields()`. Every page logs through it (`ui_helpers.audit()` fills in the signed-in user) |
 | `case_workflow.py` | Case ownership rules — `claim()` / `release()` / `change_status()`; only the claimer changes status, Admin/Supervisor may release (not take) someone's claim, QA can't claim. Logs to audit + notifies Discord. No Streamlit import |
@@ -63,7 +66,7 @@ ollama serve
 
 `Home.py` is the router (see **Login & role-based navigation**), not just a landing page.
 
-Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py` (Dashboard → ภาพรวม), `3_👥_Customers.py`, `4_Settings.py`, `5_👤_Users.py`, `6_➕_Data_Entry.py`, `7_📜_Audit_Log.py`, `8_Dashboard_Insights.py`, `9_Dashboard_Anomaly.py`, `10_Agent_Performance.py`, `11_Cases.py` (จัดการเคส), `12_Call_Summaries.py`
+Streamlit pages: `pages/1_📤_Admin.py`, `2_📊_Dashboard.py` (Dashboard → ภาพรวม), `3_👥_Customers.py`, `4_Settings.py`, `5_👤_Users.py`, `6_➕_Data_Entry.py`, `7_📜_Audit_Log.py`, `8_Dashboard_Insights.py`, `9_Dashboard_Anomaly.py`, `10_Agent_Performance.py`, `11_Cases.py` (จัดการเคส), `12_Call_Summaries.py`, `13_Sales_Orders.py` (ใบสั่งขาย)
 
 ### Dashboard is split into pages
 
@@ -192,14 +195,14 @@ No DB migration needed for direction/agent — derive at filter-time.
 
 Permissions live in one place, `auth.ROLE_PERMISSIONS`:
 
-| Role | home | admin | dashboard pages* + cases | customers | data_entry | audit | settings | users |
+| Role | home | admin | dashboard pages* + cases | customers + sales_orders | data_entry | audit | settings | users |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | Admin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Supervisor | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ |
 | QA | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Agent | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 
-\* `auth.DASHBOARD_PAGES` — dashboard, insights, anomaly, agent_performance, calls. Every role sees all of them plus `cases`.
+\* `auth.DASHBOARD_PAGES` — dashboard, insights, anomaly, agent_performance, calls. Every role sees all of them plus `cases`. `sales_orders` is readable by every role; importing/editing/hiding SOs on that page follows `can_access(role, PAGE_DATA_ENTRY)` (Admin).
 
 Rules to keep intact:
 
@@ -251,6 +254,8 @@ readable on `pages/7_📜_Audit_Log.py` (Admin + Supervisor):
 | `pages/5_👤_Users.py` | account create, role & status change (enable/disable) |
 | `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case subject/merge |
 | `case_workflow` | case claim / release / status change (Cases + Admin pages both call it via `ui_helpers.render_case_ownership()`) |
+| `sales_orders` | SO import (one `import` entry per file), create, update (header diff + line count), hide, restore, customer link |
+| `customer_entry.set_warranty_status()` | warranty `cancel` / `reactivate` |
 | `pages/4_Settings.py` | `.env` saves and the Quick Mode presets |
 
 Rules that keep the trail trustworthy:
@@ -266,6 +271,33 @@ Rules that keep the trail trustworthy:
 - Adding a new mutating action means adding an `audit()` call next to it —
   `tests/test_audit.py` checks that every page which changes data touches the trail.
 
+## Sales orders (SO) + warranty fields from the company templates
+
+The company sent its blank "ใบสั่งขาย" (Dynamics NAV) and warranty-registration
+screens to show **which fields** must be stored (real data can't be shared — never
+ship sample rows that look real; the Excel template has headers only).
+
+- `sales_orders` (header) + `sales_order_lines`; `so_number` is UNIQUE and is the
+  upsert key — re-importing a file updates the SO and **replaces all its lines**.
+  SOs are hidden (`deleted_at`), never deleted, like customers.
+- Import format is **one row per line item**, header columns repeated. Columns are
+  matched by normalised name (`sales_orders.map_columns`), so our Thai template and
+  NAV exports both work. A bare `No.` is the item number when `Document No.` is
+  present, otherwise the SO number. Errors are reported per Excel row and block
+  the import button.
+- Blank amounts are computed (`complete_totals`); values given in the file win.
+  The edit form's "auto totals" checkbox defaults on only when the stored totals
+  equal what the lines add up to (`totals_follow_lines`).
+- Customer link: ship-to phone, then sell-to phone (`find_customer_id`). A re-import
+  whose phone matches nobody keeps an existing (manual) link.
+- Warranty: `so_number` (text reference, not an FK — a warranty may be entered
+  before its SO is imported), `ref_id`, `status` active/cancelled (**Cancel keeps the
+  row visible** with its status; hiding is `deleted_at`), `proof_path`. Proof files
+  go through `file_manager.save_proof_file()` — type sniffed from content
+  (jpg/png/webp/pdf), ≤10 MB, named by SHA-256 under `data/warranty_proofs/`; old
+  proofs are never removed (audit rows point at them).
+- Customers gained `nick_name` and `channel`.
+
 ## Case ownership (claim / no stealing / Discord)
 
 - A case is claimed with `db.claim_case()` — one `UPDATE ... WHERE assignee_username IS NULL AND status != 'closed'`, so two simultaneous clicks can't both win. Status changes go through `db.set_case_status_as_assignee()`, which checks the owner in its `WHERE` too. Never change a case's status from a page with `db.update_case_status()` — that helper is for the pipeline's auto `follow_up` only.
@@ -278,7 +310,7 @@ Rules that keep the trail trustworthy:
 - **Menu:** `Home._PAGE_SPECS` gives every page a Thai title and a `:material/...:` icon (`tests/test_usability.py` checks both), and `st.navigation(..., expanded=True)` — without it Streamlit hides links past the 10th behind "View more".
 - **Home page** is a work queue: unclaimed cases, my open cases, severe anomalies, each with an `st.page_link` shortcut. The case shortcuts pass `?owner=unassigned|mine`, which `11_Cases.py` applies once to its owner filter and then removes.
 - **Destructive actions ask first.** Deleting calls (one or many) and merging cases open an `@st.dialog` with "ลบถาวร"/"ยกเลิก". File removal goes through `file_manager.remove_audio_file()`, which reports a locked file instead of raising.
-- **Click any cell to read the row.** Tables with long text (Cases, Call list, Agent Performance, Audit Log) use `selection_mode=ui_helpers.TABLE_CLICK_MODES` (row + cell, so a click on the text counts, not only the narrow checkbox) and open an `@st.dialog(width="large")` with the full text. `ui_helpers.picked_row()` returns `(row, is_new)` so the dialog opens once per click, not on every rerun; each page also offers a "เปิด…อีกครั้ง" button.
+- **Click any cell to read the row.** Tables with long text or a detail view (Cases, Call list, Agent Performance, Audit Log, Sales orders, Customers + their warranties) use `selection_mode=ui_helpers.TABLE_CLICK_MODES` (cell only — a click on any cell counts; row mode is left out because its checkbox column reopened the dialog when a box was un-ticked) and open an `@st.dialog(width="large")` with the full text. `ui_helpers.picked_row()` returns `(row, is_new)`; only a selection that gains something is new, so the dialog opens once per click — not on reruns, not on deselecting; each page also offers a "เปิด…อีกครั้ง" button.
 - **Selections are row positions, not ids.** When an action reorders the table (claiming a case bumps its `updated_at`), the selection points at a different row. The Cases table key includes a hash of the row order so the selection resets, and the dialog re-opens by the remembered case id (`_case_dialog_case`) to show the result.
 - Transcripts render through `ui_helpers.render_transcript()` — labels [พนักงาน]/[ลูกค้า], HTML-escaped (the text comes from speech recognition).
 - Show **when the call happened** from `file_manager.extract_call_time_from_filename()`; `created_at` is only the upload time.

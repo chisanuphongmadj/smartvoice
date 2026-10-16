@@ -106,6 +106,43 @@ def remove_audio_file(path: str | None) -> bool:
     return True
 
 
+# ── Proof-of-purchase files (warranty registrations) ─────────────────────
+PROOF_DIR = os.path.join("data", "warranty_proofs")
+MAX_PROOF_SIZE_MB = 10
+_PROOF_SIGS = {b"\xff\xd8\xff": ".jpg", b"\x89PNG\r\n\x1a\n": ".png", b"%PDF": ".pdf"}
+
+
+def sniff_proof_type(file_bytes: bytes) -> str | None:
+    """'.jpg' / '.png' / '.pdf' by content, not by the name the user gave it."""
+    for sig, ext in _PROOF_SIGS.items():
+        if file_bytes.startswith(sig):
+            return ext
+    if file_bytes[:4] == b"RIFF" and file_bytes[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def save_proof_file(file_bytes: bytes) -> tuple[str | None, str | None]:
+    """Store a receipt/slip image or PDF. Returns (path, error_message).
+
+    Files are named by their SHA-256, so uploading the same receipt twice
+    keeps one copy. Old proofs are never removed — the audit log points at them.
+    """
+    if not file_bytes:
+        return None, "ไฟล์ว่างเปล่า"
+    if len(file_bytes) > MAX_PROOF_SIZE_MB * 1024 * 1024:
+        return None, f"ไฟล์ใหญ่เกิน {MAX_PROOF_SIZE_MB} MB"
+    ext = sniff_proof_type(file_bytes)
+    if not ext:
+        return None, "รองรับเฉพาะรูป JPG / PNG / WEBP หรือไฟล์ PDF"
+    os.makedirs(PROOF_DIR, exist_ok=True)
+    path = os.path.join(PROOF_DIR, compute_file_hash(file_bytes) + ext)
+    if not os.path.exists(path):
+        with open(path, "wb") as fh:
+            fh.write(file_bytes)
+    return path, None
+
+
 def extract_phone_from_filename(filename: str) -> str | None:
     """Extract a Thai phone number (10 digits starting with 0) from a filename.
 

@@ -1,14 +1,12 @@
-from datetime import date
-
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="SmartVoice — ลูกค้าและการรับประกัน", layout="wide")
 
-from smartvoice import db, labels
+from smartvoice import db
 from smartvoice.auth import PAGE_CUSTOMERS
-from smartvoice.customer_entry import compute_expiry_date
-from smartvoice.ui_helpers import init_page
+from smartvoice.customer_view import customer_name, customer_rows, render_customer_detail, warranty_rows
+from smartvoice.ui_helpers import TABLE_CLICK_MODES, init_page, picked_row
 
 init_page(PAGE_CUSTOMERS)
 
@@ -16,46 +14,27 @@ init_page(PAGE_CUSTOMERS)
 # PAGE: CUSTOMERS & WARRANTY
 # ─────────────────────────────────────────
 st.title("ลูกค้าและการรับประกัน")
-st.caption("ค้นหาลูกค้า ดูทะเบียนรับประกัน เคส และสายที่เคยโทรเข้ามา — เพิ่มหรือแก้ไขข้อมูลได้ที่เมนู เพิ่ม/แก้ไขข้อมูลลูกค้า")
+st.caption("ค้นหาลูกค้า ดูทะเบียนรับประกัน ใบสั่งขาย (SO) เคส และสายที่เคยโทรเข้ามา — เพิ่มหรือแก้ไขข้อมูลได้ที่เมนู เพิ่ม/แก้ไขข้อมูลลูกค้า")
 
 
-def _warranty_expiry(w: dict) -> str | None:
-    """Stored expiry, or purchase date + warranty length for older rows that lack one."""
-    return w.get("expiry_date") or compute_expiry_date(
-        w.get("date_of_purchase"), w.get("warranty_period_months")
-    )
+@st.dialog("รายละเอียดลูกค้า", width="large")
+def _customer_dialog(customer_id: int) -> None:
+    render_customer_detail(customer_id)
 
 
-def _warranty_state(expiry: str | None) -> str:
-    if not expiry:
-        return "ไม่ทราบ"
-    try:
-        return "อยู่ในประกัน" if date.fromisoformat(expiry[:10]) >= date.today() else "หมดประกันแล้ว"
-    except ValueError:
-        return "ไม่ทราบ"
+def _open_on_click(event, memory_key: str, owners: list[tuple], button_key: str) -> None:
+    """Open the clicked row's customer once per click, plus a button to reopen it.
 
-
-def _warranty_rows(warranties: list[dict], with_owner: bool) -> pd.DataFrame:
-    rows = []
-    for w in warranties:
-        expiry = _warranty_expiry(w)
-        row = {"เลขทะเบียน": w.get("registration_no") or "-"}
-        if with_owner:
-            row["ลูกค้า"] = f"{w.get('first_name') or ''} {w.get('last_name') or ''}".strip() or "-"
-            row["เบอร์โทร"] = w.get("phone") or "-"
-        row.update({
-            "แบรนด์": w.get("brand") or "-",
-            "รุ่น": w.get("model") or "-",
-            "ขนาด": w.get("size") or "-",
-            "หมวดหมู่": w.get("category") or "-",
-            "ช่องทางซื้อ": w.get("purchase_channel") or "-",
-            "Serial": w.get("serial_no") or "-",
-            "วันที่ซื้อ": labels.thai_time(w.get("date_of_purchase"), with_time=False),
-            "หมดประกัน": labels.thai_time(expiry, with_time=False),
-            "สถานะประกัน": _warranty_state(expiry),
-        })
-        rows.append(row)
-    return pd.DataFrame(rows)
+    `owners` is (customer_id, name) per table row, in table order.
+    """
+    row, is_new = picked_row(event, memory_key)
+    if row is None or row >= len(owners) or not owners[row][0]:
+        return
+    customer_id, name = owners[row]
+    if is_new:
+        _customer_dialog(customer_id)
+    if st.button(f"เปิดข้อมูลของ {name} อีกครั้ง", key=button_key):
+        _customer_dialog(customer_id)
 
 
 tab1, tab2 = st.tabs(["ลูกค้า", "ทะเบียนรับประกัน"])
@@ -75,84 +54,29 @@ with tab1:
                 if q in f"{c['first_name']} {c['last_name']} {c['phone'] or ''}".lower()
                 or q.replace("-", "").replace(" ", "") in (c["phone"] or "")
             ]
-        st.caption(f"พบ {len(customers)} ราย")
+        st.caption(
+            f"พบ {len(customers)} ราย — คลิกแถวไหนก็ได้เพื่อเปิดดูทะเบียนรับประกัน "
+            "ใบสั่งขาย เคส และสายของลูกค้าคนนั้น"
+        )
 
         if not customers:
             st.warning("ไม่พบลูกค้าที่ตรงกับคำค้น — ลองพิมพ์แค่ชื่อ หรือเบอร์บางส่วน")
         else:
-            st.dataframe(
-                pd.DataFrame([
-                    {
-                        "ชื่อ": f"{c['first_name']} {c['last_name']}",
-                        "เบอร์โทร": c["phone"] or "-",
-                        "อีเมล": c["email"] or "-",
-                        "จังหวัด": c["city_province"] or "-",
-                        "เพิ่มเมื่อ": labels.thai_time(c["created_at"], with_time=False),
-                    }
-                    for c in customers
-                ]),
+            # The key follows the rows shown, so a new search resets the
+            # selection instead of pointing the old row position at someone else.
+            event = st.dataframe(
+                customer_rows(customers),
                 width="stretch",
                 hide_index=True,
+                on_select="rerun",
+                selection_mode=TABLE_CLICK_MODES,
+                key=f"_customer_table_{hash(tuple(c['id'] for c in customers))}",
             )
-
-            st.divider()
-            st.subheader("รายละเอียดลูกค้า")
-            cust_map = {f"{c['first_name']} {c['last_name']} ({c['phone'] or '-'})": c for c in customers}
-            sel_name = st.selectbox("เลือกลูกค้า", list(cust_map.keys()))
-            if sel_name:
-                c = cust_map[sel_name]
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.markdown(f"**ชื่อ:** {c['first_name']} {c['last_name']}")
-                    st.markdown(f"**เพศ:** {c['gender'] or '-'}")
-                    st.markdown(f"**วันเกิด:** {labels.thai_time(c['date_of_birth'], with_time=False)}")
-                    st.markdown(f"**เบอร์:** {c['phone'] or '-'}")
-                    st.markdown(f"**อีเมล:** {c['email'] or '-'}")
-                with col_b:
-                    st.markdown(f"**ที่อยู่:** {c['address'] or '-'}")
-                    st.markdown(f"**แขวง/ตำบล:** {c['subdistrict'] or '-'}")
-                    st.markdown(f"**เขต/อำเภอ:** {c['district'] or '-'}")
-                    st.markdown(f"**จังหวัด:** {c['city_province'] or '-'}")
-                    st.markdown(f"**รหัสไปรษณีย์:** {c['postcode'] or '-'}")
-
-                warrs = db.get_warranties_by_customer(c["id"])
-                if warrs:
-                    st.markdown(f"**ทะเบียนรับประกัน ({len(warrs)} รายการ)**")
-                    st.dataframe(_warranty_rows(warrs, with_owner=False), width="stretch", hide_index=True)
-
-                # ── Cases of this customer ──
-                cases = db.get_cases_by_customer(c["id"])
-                if cases:
-                    st.markdown(f"**เคส ({len(cases)} เคส)**")
-                    for cs in cases:
-                        case_calls = db.get_calls_by_case(cs["id"])
-                        owner = cs.get("assignee_name") or "ยังไม่มีคนรับ"
-                        with st.expander(
-                            f"เคส #{cs['id']}: {cs['subject']}  —  {labels.case_status(cs['status'])}  "
-                            f"•  ผู้รับเคส: {owner}  ({len(case_calls)} สาย)"
-                        ):
-                            st.caption(
-                                f"สร้าง: {labels.thai_time(cs.get('created_at'))}  •  "
-                                f"อัปเดตล่าสุด: {labels.thai_time(cs.get('updated_at'))}"
-                            )
-                            for oc in case_calls:
-                                # The summary goes on its own line, in full: Thai has
-                                # no spaces between words, so any character cut lands
-                                # mid-word (every summary in the DB is 130-330 chars).
-                                st.markdown(f"- {oc['filename']} ({labels.call_status(oc['status'])})")
-                                if oc.get("summary"):
-                                    st.caption(oc["summary"])
-
-                # ── Calls linked to this customer (even without a case) ──
-                all_calls = db.get_calls_by_customer(c["id"])
-                linked_no_case = [cl for cl in all_calls if not cl.get("case_id")]
-                if linked_no_case:
-                    st.markdown(f"**สายที่เชื่อมไว้แต่ยังไม่มีเคส ({len(linked_no_case)})**")
-                    for cl in linked_no_case:
-                        _badge = "จับคู่อัตโนมัติจากเบอร์" if cl.get("matched_by") == "auto_phone" else "จับคู่เอง"
-                        st.caption(f"- {cl['filename']} ({labels.call_status(cl['status'])}) — {_badge}")
-                if not warrs and not cases and not all_calls:
-                    st.caption("ลูกค้ารายนี้ยังไม่มีทะเบียนรับประกัน เคส หรือสายในระบบ")
+            _open_on_click(
+                event, "_customer_table_pick",
+                [(c["id"], customer_name(c)) for c in customers],
+                "_customer_reopen",
+            )
 
 with tab2:
     warranties = db.get_all_warranties()
@@ -164,7 +88,7 @@ with tab2:
         # ── Search bar ──
         w_search = st.text_input(
             "ค้นหาทะเบียนรับประกัน",
-            placeholder="ชื่อลูกค้า, เบอร์, เลขทะเบียน, Serial, แบรนด์, รุ่น ...",
+            placeholder="ชื่อลูกค้า, เบอร์, เลขทะเบียน, Serial, เลขที่ SO, Ref Id, แบรนด์, รุ่น ...",
             key="warranty_search",
         )
 
@@ -184,7 +108,7 @@ with tab2:
         filtered = wdf_all.copy()
         if w_search.strip():
             q = w_search.strip().lower()
-            search_cols = [col for col in ("registration_no", "serial_no", "first_name", "last_name", "phone", "brand", "model") if col in filtered.columns]
+            search_cols = [col for col in ("registration_no", "serial_no", "so_number", "ref_id", "first_name", "last_name", "phone", "brand", "model") if col in filtered.columns]
             mask = filtered[search_cols].fillna("").apply(
                 lambda row: q in " ".join(row.astype(str)).lower(), axis=1
             )
@@ -215,8 +139,18 @@ with tab2:
         if filtered.empty:
             st.warning("ไม่พบทะเบียนที่ตรงกับคำค้นหรือตัวกรอง")
         else:
-            st.dataframe(
-                _warranty_rows(filtered.to_dict("records"), with_owner=True),
+            records = filtered.to_dict("records")
+            st.caption("คลิกแถวไหนก็ได้เพื่อเปิดดูข้อมูลทั้งหมดของลูกค้าเจ้าของทะเบียน")
+            event = st.dataframe(
+                warranty_rows(records, with_owner=True),
                 width="stretch",
                 hide_index=True,
+                on_select="rerun",
+                selection_mode=TABLE_CLICK_MODES,
+                key=f"_warranty_table_{hash(tuple(r['id'] for r in records))}",
+            )
+            _open_on_click(
+                event, "_warranty_table_pick",
+                [(r.get("customer_id"), customer_name(r)) for r in records],
+                "_warranty_reopen",
             )

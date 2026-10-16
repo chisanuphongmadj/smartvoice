@@ -2,6 +2,7 @@
 
 import html
 import json
+import os
 import re
 import threading
 import time
@@ -555,6 +556,22 @@ def _speaker_role(speaker: str, mapping: dict) -> str:
     return speaker
 
 
+def render_proof(path: str | None, key: str, width: int = 280) -> None:
+    """A warranty's proof of purchase: the picture itself, or a download for a PDF."""
+    if not path:
+        st.caption("ยังไม่มีหลักฐานการซื้อ")
+        return
+    if not os.path.exists(path):
+        st.caption("ไม่พบไฟล์หลักฐานในเครื่อง (อาจถูกย้ายหรือลบ)")
+        return
+    if path.lower().endswith(".pdf"):
+        with open(path, "rb") as fh:
+            st.download_button("ดาวน์โหลดหลักฐาน (PDF)", fh.read(), file_name=os.path.basename(path),
+                               mime="application/pdf", key=key)
+    else:
+        st.image(path, width=width)
+
+
 def render_transcript(call: dict) -> None:
     """The call's transcript, one line per turn, labelled [พนักงาน] / [ลูกค้า]."""
     transcript = call.get("transcript") or ""
@@ -590,17 +607,18 @@ def render_transcript(call: dict) -> None:
 # ── Click a table row to read it ─────────────────────────────────────────
 
 # Pass as st.dataframe(selection_mode=...). With "single-cell" a click on ANY
-# cell counts — with rows alone, only the narrow checkbox on the left selected
-# a row and a click on the text just opened Streamlit's cell overlay.
-TABLE_CLICK_MODES = ["single-row", "single-cell"]
+# cell counts. Row mode is left out on purpose: it adds a checkbox column, and
+# un-ticking a box while the clicked cell stayed selected reopened the dialog.
+TABLE_CLICK_MODES = ["single-cell"]
 
 
 def picked_row(event, memory_key: str) -> tuple[int | None, bool]:
     """(row position the user clicked, whether it is a new click).
 
     "New" lets a page open its detail dialog once per click instead of on
-    every rerun after it; clearing the selection resets it, so clicking the
-    same row again reopens the dialog.
+    every rerun after it. Only a selection that *gains* something is a click —
+    removing part of it (deselecting) never opens anything. Clearing the
+    selection resets it, so clicking the same row again reopens the dialog.
     """
     selection = event.selection
     rows = list(selection.get("rows", []))
@@ -609,9 +627,9 @@ def picked_row(event, memory_key: str) -> tuple[int | None, bool]:
     if row is None:
         st.session_state.pop(memory_key, None)
         return None, False
-    signature = (tuple(rows), tuple(cells))
-    is_new = st.session_state.get(memory_key) != signature
-    st.session_state[memory_key] = signature
+    picked = {("row", r) for r in rows} | {("cell", *c) for c in cells}
+    is_new = bool(picked - st.session_state.get(memory_key, set()))
+    st.session_state[memory_key] = picked
     return row, is_new
 
 

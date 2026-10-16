@@ -71,7 +71,8 @@ def test_home_does_not_run_network_readiness_checks_on_every_rerun():
 def test_thai_summaries_are_not_cut_at_a_fixed_character_count():
     """Thai has no spaces between words, so slicing a summary always cuts
     mid-word — and every summary in the database is longer than 100 chars."""
-    page = Path("pages/3_👥_Customers.py").read_text(encoding="utf-8")
+    # The customer detail (cases + call summaries) is drawn by customer_view.
+    page = Path("smartvoice/customer_view.py").read_text(encoding="utf-8")
 
     assert "summary') or '—')[:100]" not in page
     assert 'st.caption(oc["summary"])' in page
@@ -104,6 +105,7 @@ def test_every_page_file_enforces_its_role_permission():
         "1_📤_Admin.py": auth.PAGE_ADMIN,
         "2_📊_Dashboard.py": auth.PAGE_DASHBOARD,
         "3_👥_Customers.py": auth.PAGE_CUSTOMERS,
+        "13_Sales_Orders.py": auth.PAGE_SALES_ORDERS,
         "4_Settings.py": auth.PAGE_SETTINGS,
         "5_👤_Users.py": auth.PAGE_USERS,
         "6_➕_Data_Entry.py": auth.PAGE_DATA_ENTRY,

@@ -27,6 +27,9 @@ LOGIN_FAILED = "login_failed"
 LOGOUT = "logout"
 CLAIM = "claim"            # a staff member takes ownership of a case
 RELEASE = "release"        # a case's owner is cleared (by them or a supervisor)
+CANCEL = "cancel"          # a warranty registration set to Cancelled (still shown)
+REACTIVATE = "reactivate"  # a cancelled warranty set back to Active
+IMPORT = "import"          # a batch of sales orders loaded from Excel/CSV
 
 # ── Entities ─────────────────────────────────────────────────────────────
 ENTITY_CUSTOMER = "customer"
@@ -36,6 +39,7 @@ ENTITY_CALL = "call"
 ENTITY_CASE = "case"
 ENTITY_SESSION = "session"
 ENTITY_SETTINGS = "settings"
+ENTITY_SALES_ORDER = "sales_order"
 
 ACTION_LABELS_TH = {
     CREATE: "เพิ่ม",
@@ -47,6 +51,9 @@ ACTION_LABELS_TH = {
     LOGOUT: "ออกจากระบบ",
     CLAIM: "รับเคส",
     RELEASE: "คืนเคส",
+    CANCEL: "ยกเลิก",
+    REACTIVATE: "เปิดใช้อีกครั้ง",
+    IMPORT: "นำเข้าไฟล์",
 }
 
 ENTITY_LABELS_TH = {
@@ -57,6 +64,7 @@ ENTITY_LABELS_TH = {
     ENTITY_CASE: "เคส",
     ENTITY_SESSION: "การเข้าใช้งาน",
     ENTITY_SETTINGS: "ตั้งค่าระบบ",
+    ENTITY_SALES_ORDER: "ใบสั่งขาย (SO)",
 }
 
 # Never write these into the log, whatever the caller passes.

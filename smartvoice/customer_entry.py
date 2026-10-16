@@ -402,3 +402,28 @@ def restore_warranty(
 
     _log("restore", ENTITY_WARRANTY, warranty_id, warranty_label(row), actor, actor_role)
     return None
+
+
+# ── Warranty status (Active / Cancel) ────────────────────────────────────
+#
+# Mirrors the company system's "Cancel" button. A cancelled registration stays
+# visible with its status — unlike hiding, which takes it off every list.
+
+def set_warranty_status(
+    warranty_id: int, status: str, actor: str | None = None, actor_role: str | None = None
+) -> str | None:
+    """Cancel or reactivate a warranty. Returns an error, or None."""
+    row = db.get_warranty_by_id(warranty_id)
+    if not row:
+        return "ไม่พบทะเบียนรับประกันนี้แล้ว — อาจถูกซ่อนไว้ก่อนหน้านี้"
+    if status not in ("active", "cancelled"):
+        return "สถานะไม่ถูกต้อง"
+    if not db.set_warranty_status(warranty_id, status, actor=actor):
+        return "ทะเบียนนี้อยู่ในสถานะนั้นอยู่แล้ว"
+    before = row.get("status") or "active"
+    _log(
+        audit.CANCEL if status == "cancelled" else audit.REACTIVATE,
+        ENTITY_WARRANTY, warranty_id, warranty_label(row), actor, actor_role,
+        {"status": [before, status]},
+    )
+    return None

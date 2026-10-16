@@ -16,6 +16,7 @@ from smartvoice import case_workflow, db, labels
 from smartvoice.auth import PAGE_CASES
 from smartvoice.customer_entry import compute_expiry_date
 from smartvoice.dashboard_common import inject_dashboard_css
+from smartvoice.so_view import render_customer_orders
 from smartvoice.ui_helpers import (
     TABLE_CLICK_MODES,
     current_case_actor,
@@ -89,11 +90,14 @@ def _case_dialog(case_id: int) -> None:
                 expiry = w.get("expiry_date") or compute_expiry_date(
                     w.get("date_of_purchase"), w.get("warranty_period_months")
                 )
+                cancelled = "  •  ทะเบียนถูกยกเลิก" if w.get("status") == "cancelled" else ""
                 st.caption(
                     f"{product}  •  ทะเบียน {w.get('registration_no') or '-'}  •  "
                     f"ซื้อ {labels.thai_time(w.get('date_of_purchase'), with_time=False)}  •  "
-                    f"หมดประกัน {labels.thai_time(expiry, with_time=False)}"
+                    f"หมดประกัน {labels.thai_time(expiry, with_time=False)}{cancelled}"
                 )
+        # What the customer ordered and when it ships — most calls are about this.
+        render_customer_orders(picked["customer_id"], limit=5)
 
     st.divider()
     render_case_ownership(picked, key_suffix="dlg")

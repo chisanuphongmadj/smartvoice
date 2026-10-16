@@ -137,14 +137,93 @@ def init_db() -> None:
                 updated_at    TEXT NOT NULL
             )
         """)
+        _create_sales_order_tables(conn)
         _migrate(conn)
     conn.close()
+
+
+# ── Sales orders (SO) ─────────────────────────────────────────────────────
+# Mirrors the company's sales-order document (Dynamics NAV "ใบสั่งขาย"): a
+# header with sell-to / ship-to parties and totals, plus item lines.
+SO_HEADER_COLUMNS = (
+    "so_number", "document_date", "order_date", "shipment_date", "promised_delivery_date",
+    "due_date", "currency", "sales_type", "purchasing_type", "salesperson",
+    "external_doc", "credit_term", "customer_po_no",
+    "sell_to_no", "sell_to_name", "sell_to_address", "sell_to_contact", "sell_to_phone",
+    "ship_to_name", "ship_to_address", "ship_to_contact", "ship_to_phone", "ship_to_email",
+    "total", "discount", "net_amount", "vat", "grand_total", "remark",
+)
+SO_LINE_COLUMNS = (
+    "line_no", "item_no", "description", "requested_delivery_date", "uom",
+    "location", "quantity", "unit_price", "discount", "amount",
+)
+_SO_MONEY_COLUMNS = {"total", "discount", "net_amount", "vat", "grand_total"}
+
+
+def _create_sales_order_tables(conn: sqlite3.Connection) -> None:
+    header_cols = ",\n".join(
+        f"                {col} {'REAL' if col in _SO_MONEY_COLUMNS else 'TEXT'}"
+        for col in SO_HEADER_COLUMNS if col != "so_number"
+    )
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS sales_orders (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            so_number    TEXT NOT NULL UNIQUE,
+{header_cols},
+            customer_id  INTEGER REFERENCES customers(id),
+            created_at   TEXT NOT NULL,
+            updated_at   TEXT NOT NULL,
+            created_by   TEXT,
+            deleted_at   TEXT,
+            deleted_by   TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sales_order_lines (
+            id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+            sales_order_id           INTEGER NOT NULL REFERENCES sales_orders(id) ON DELETE CASCADE,
+            line_no                  INTEGER,
+            item_no                  TEXT,
+            description              TEXT,
+            requested_delivery_date  TEXT,
+            uom                      TEXT,
+            location                 TEXT,
+            quantity                 REAL,
+            unit_price               REAL,
+            discount                 REAL,
+            amount                   REAL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_so_customer ON sales_orders(customer_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_so_ship_phone ON sales_orders(ship_to_phone)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_so_lines_order ON sales_order_lines(sales_order_id)")
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
     _migrate_calls(conn)
     _migrate_soft_delete(conn)
     _migrate_case_assignment(conn)
+    _migrate_warranty_fields(conn)
+
+
+def _migrate_warranty_fields(conn: sqlite3.Connection) -> None:
+    """Fields the company's warranty-registration system has and we lacked.
+
+    `status` is the system's Active/Cancelled state — a cancelled registration
+    is still shown (with its status), unlike a hidden (`deleted_at`) row.
+    """
+    for table, columns in (
+        ("customers", (("nick_name", "TEXT"), ("channel", "TEXT"))),
+        ("warranty_registrations", (
+            ("ref_id", "TEXT"), ("so_number", "TEXT"),
+            ("status", "TEXT DEFAULT 'active'"), ("cancelled_at", "TEXT"),
+            ("cancelled_by", "TEXT"), ("proof_path", "TEXT"),
+        )),
+    ):
+        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for col, col_type in columns:
+            if col not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
 
 
 def _migrate_case_assignment(conn: sqlite3.Connection) -> None:
@@ -524,6 +603,7 @@ def insert_customer(
     gender: str = None, date_of_birth: str = None, address: str = None,
     subdistrict: str = None, district: str = None, city_province: str = None,
     country: str = "Thailand", postcode: str = None,
+    nick_name: str = None, channel: str = None,
 ) -> int:
     """Insert a customer. If phone already exists, returns the existing customer's id
     (idempotent — safe for seed scripts to re-run).
@@ -541,10 +621,12 @@ def insert_customer(
         cur = conn.execute(
             """INSERT INTO customers
                (first_name, last_name, phone, email, gender, date_of_birth,
-                address, subdistrict, district, city_province, country, postcode, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                address, subdistrict, district, city_province, country, postcode,
+                nick_name, channel, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (first_name, last_name, phone, email, gender, date_of_birth,
-             address, subdistrict, district, city_province, country, postcode, now),
+             address, subdistrict, district, city_province, country, postcode,
+             nick_name, channel, now),
         )
     conn.close()
     return cur.lastrowid
@@ -598,6 +680,7 @@ def get_customer_by_id(customer_id: int, include_deleted: bool = False) -> dict 
 CUSTOMER_EDITABLE_COLUMNS = (
     "first_name", "last_name", "phone", "email", "gender", "date_of_birth",
     "address", "subdistrict", "district", "city_province", "country", "postcode",
+    "nick_name", "channel",
 )
 
 
@@ -724,6 +807,7 @@ def insert_warranty(
     warranty_period_months: int = 120, date_of_purchase: str = None,
     date_of_delivery: str = None, purchase_channel: str = None,
     order_number: str = None, expiry_date: str = None, remark: str = None,
+    ref_id: str = None, so_number: str = None, proof_path: str = None,
 ) -> int:
     """Insert a warranty registration. If registration_no already exists,
     returns the existing id (idempotent — safe for seed scripts to re-run).
@@ -742,12 +826,12 @@ def insert_warranty(
                (registration_no, customer_id, channel, certificate_no, category, brand,
                 model, size, sku, serial_no, label_no, warranty_period_months,
                 date_of_purchase, date_of_delivery, purchase_channel, order_number,
-                expiry_date, remark, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                expiry_date, remark, ref_id, so_number, proof_path, status, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?)""",
             (registration_no, customer_id, channel, certificate_no, category, brand,
              model, size, sku, serial_no, label_no, warranty_period_months,
              date_of_purchase, date_of_delivery, purchase_channel, order_number,
-             expiry_date, remark, now),
+             expiry_date, remark, ref_id, so_number, proof_path, now),
         )
     conn.close()
     return cur.lastrowid
@@ -770,6 +854,7 @@ WARRANTY_EDITABLE_COLUMNS = (
     "brand", "model", "size", "sku", "serial_no", "label_no",
     "warranty_period_months", "date_of_purchase", "date_of_delivery",
     "purchase_channel", "order_number", "expiry_date", "remark",
+    "ref_id", "so_number", "proof_path",
 )
 
 
@@ -818,6 +903,40 @@ def restore_warranty(warranty_id: int) -> int:
         restored = cur.rowcount
     conn.close()
     return restored
+
+
+def set_warranty_status(warranty_id: int, status: str, actor: str | None = None) -> int:
+    """Active ↔ cancelled, like the company system's "Cancel" button.
+
+    Cancelling keeps the row visible with its status (it is a business state,
+    not a deletion); `cancelled_at` / `cancelled_by` record who did it.
+    """
+    if status not in ("active", "cancelled"):
+        raise ValueError(f"unknown warranty status {status!r}")
+    stamp = (_now(), actor) if status == "cancelled" else (None, None)
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            """UPDATE warranty_registrations
+               SET status = ?, cancelled_at = ?, cancelled_by = ?
+               WHERE id = ? AND COALESCE(status, 'active') != ?""",
+            (status, *stamp, warranty_id, status),
+        )
+        changed = cur.rowcount
+    conn.close()
+    return changed
+
+
+def get_warranties_by_so_number(so_number: str) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT w.*, c.first_name, c.last_name, c.phone
+           FROM warranty_registrations w LEFT JOIN customers c ON c.id = w.customer_id
+           WHERE w.so_number = ? AND w.deleted_at IS NULL""",
+        (so_number,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def get_warranties_by_customer(customer_id: int, include_deleted: bool = False) -> list[dict]:
@@ -936,6 +1055,181 @@ def get_call_customer_link(call_id: int) -> dict | None:
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ─── Sales orders ────────────────────────────────────────────────────────────
+
+def save_sales_order(header: dict, lines: list[dict], actor: str | None = None) -> tuple[int, bool]:
+    """Insert or update an SO by its number, replacing its lines.
+
+    Returns (id, created). A hidden SO that is saved again comes back.
+    """
+    values = {col: header.get(col) for col in SO_HEADER_COLUMNS}
+    if not values["so_number"]:
+        raise ValueError("so_number is required")
+    now = _now()
+    conn = get_connection()
+    with conn:
+        row = conn.execute(
+            "SELECT id FROM sales_orders WHERE so_number = ?", (values["so_number"],)
+        ).fetchone()
+        customer_id = header.get("customer_id")
+        if row:
+            so_id, created = row["id"], False
+            assignments = ", ".join(f"{col} = ?" for col in values)
+            conn.execute(
+                f"""UPDATE sales_orders SET {assignments}, customer_id = ?, updated_at = ?,
+                    deleted_at = NULL, deleted_by = NULL WHERE id = ?""",
+                (*values.values(), customer_id, now, so_id),
+            )
+            conn.execute("DELETE FROM sales_order_lines WHERE sales_order_id = ?", (so_id,))
+        else:
+            cols = ", ".join(values)
+            marks = ", ".join("?" for _ in values)
+            cur = conn.execute(
+                f"""INSERT INTO sales_orders ({cols}, customer_id, created_at, updated_at, created_by)
+                    VALUES ({marks}, ?, ?, ?, ?)""",
+                (*values.values(), customer_id, now, now, actor),
+            )
+            so_id, created = cur.lastrowid, True
+        for position, line in enumerate(lines, 1):
+            line_values = {col: line.get(col) for col in SO_LINE_COLUMNS}
+            line_values["line_no"] = line_values["line_no"] or position
+            conn.execute(
+                f"""INSERT INTO sales_order_lines (sales_order_id, {", ".join(line_values)})
+                    VALUES (?, {", ".join("?" for _ in line_values)})""",
+                (so_id, *line_values.values()),
+            )
+    conn.close()
+    return so_id, created
+
+
+def get_sales_order(so_id: int | None = None, so_number: str | None = None,
+                    include_deleted: bool = False) -> dict | None:
+    """One SO with its lines under "lines", plus the linked customer's name."""
+    where, param = ("so.id = ?", so_id) if so_id is not None else ("so.so_number = ?", so_number)
+    extra = "" if include_deleted else "AND so.deleted_at IS NULL"
+    conn = get_connection()
+    row = conn.execute(
+        f"""SELECT so.*, c.first_name, c.last_name, c.phone AS customer_phone
+            FROM sales_orders so LEFT JOIN customers c ON c.id = so.customer_id
+            WHERE {where} {extra}""",
+        (param,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        return None
+    order = dict(row)
+    order["lines"] = [
+        dict(r) for r in conn.execute(
+            "SELECT * FROM sales_order_lines WHERE sales_order_id = ? ORDER BY line_no, id",
+            (order["id"],),
+        ).fetchall()
+    ]
+    conn.close()
+    return order
+
+
+def _so_search_sql(search: str | None, customer_id: int | None, include_deleted: bool) -> tuple[str, list]:
+    where, params = [], []
+    if not include_deleted:
+        where.append("so.deleted_at IS NULL")
+    if customer_id is not None:
+        where.append("so.customer_id = ?")
+        params.append(customer_id)
+    if search:
+        like = f"%{search.strip()}%"
+        where.append(
+            "(so.so_number LIKE ? OR so.sell_to_name LIKE ? OR so.ship_to_name LIKE ? "
+            "OR so.ship_to_phone LIKE ? OR so.external_doc LIKE ? OR so.customer_po_no LIKE ? "
+            "OR EXISTS (SELECT 1 FROM sales_order_lines l WHERE l.sales_order_id = so.id "
+            "AND (l.item_no LIKE ? OR l.description LIKE ?)))"
+        )
+        params.extend([like] * 8)
+    return ("WHERE " + " AND ".join(where)) if where else "", params
+
+
+def list_sales_orders(search: str | None = None, customer_id: int | None = None,
+                      limit: int | None = None, offset: int = 0,
+                      include_deleted: bool = False) -> list[dict]:
+    """SO headers newest first (by order date), with line count and customer name."""
+    where_sql, params = _so_search_sql(search, customer_id, include_deleted)
+    sql = f"""SELECT so.*, c.first_name, c.last_name,
+                     (SELECT COUNT(*) FROM sales_order_lines l WHERE l.sales_order_id = so.id) AS line_count
+              FROM sales_orders so LEFT JOIN customers c ON c.id = so.customer_id
+              {where_sql}
+              ORDER BY COALESCE(so.order_date, so.document_date, so.created_at) DESC, so.id DESC"""
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params += [int(limit), int(offset)]
+    conn = get_connection()
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def count_sales_orders(search: str | None = None, customer_id: int | None = None,
+                       include_deleted: bool = False) -> int:
+    where_sql, params = _so_search_sql(search, customer_id, include_deleted)
+    conn = get_connection()
+    n = conn.execute(f"SELECT COUNT(*) FROM sales_orders so {where_sql}", params).fetchone()[0]
+    conn.close()
+    return int(n or 0)
+
+
+def get_deleted_sales_orders() -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM sales_orders WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def soft_delete_sales_order(so_id: int, actor: str | None = None) -> int:
+    """Hide an SO (the row and its lines stay — same policy as customers)."""
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "UPDATE sales_orders SET deleted_at = ?, deleted_by = ? WHERE id = ? AND deleted_at IS NULL",
+            (_now(), actor, so_id),
+        )
+        hidden = cur.rowcount
+    conn.close()
+    return hidden
+
+
+def restore_sales_order(so_id: int) -> int:
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            "UPDATE sales_orders SET deleted_at = NULL, deleted_by = NULL WHERE id = ? AND deleted_at IS NOT NULL",
+            (so_id,),
+        )
+        restored = cur.rowcount
+    conn.close()
+    return restored
+
+
+def get_sales_orders_for_customers(customer_ids: list[int]) -> dict[int, list[dict]]:
+    """{customer_id: [SO headers newest first]} — for the case dialog / customer page."""
+    ids = sorted({int(i) for i in customer_ids if i})
+    if not ids:
+        return {}
+    marks = ", ".join("?" for _ in ids)
+    conn = get_connection()
+    rows = conn.execute(
+        f"""SELECT so.*, (SELECT COUNT(*) FROM sales_order_lines l WHERE l.sales_order_id = so.id) AS line_count
+            FROM sales_orders so
+            WHERE so.customer_id IN ({marks}) AND so.deleted_at IS NULL
+            ORDER BY COALESCE(so.order_date, so.document_date, so.created_at) DESC""",
+        ids,
+    ).fetchall()
+    conn.close()
+    grouped: dict[int, list[dict]] = {i: [] for i in ids}
+    for row in rows:
+        grouped[row["customer_id"]].append(dict(row))
+    return grouped
 
 
 # ─── Cases ───────────────────────────────────────────────────────────────────

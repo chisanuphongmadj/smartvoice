@@ -7,8 +7,8 @@
 | รายการ | รายละเอียด |
 |---|---|
 | DBMS | SQLite 3 |
-| จำนวนตาราง | 7 (ข้อมูลธุรกิจ 5 + `users` + `audit_log`) |
-| การลบข้อมูล | `customers` / `warranty_registrations` เป็น soft delete (`deleted_at`) · `users` ใช้ปิดใช้งาน (`is_active`) · `audit_log` เขียนเพิ่มอย่างเดียว |
+| จำนวนตาราง | 9 (ข้อมูลธุรกิจ 7 + `users` + `audit_log`) |
+| การลบข้อมูล | `customers` / `warranty_registrations` / `sales_orders` เป็น soft delete (`deleted_at`) · `users` ใช้ปิดใช้งาน (`is_active`) · `audit_log` เขียนเพิ่มอย่างเดียว |
 | Encoding | UTF-8 |
 | Timezone | UTC เก็บเป็น ISO 8601 text |
 
@@ -32,6 +32,8 @@ erDiagram
         TEXT city_province
         TEXT country
         TEXT postcode
+        TEXT nick_name
+        TEXT channel
         TEXT created_at
         TEXT deleted_at
         TEXT deleted_by
@@ -57,10 +59,70 @@ erDiagram
         TEXT order_number
         TEXT expiry_date
         TEXT remark
+        TEXT ref_id
+        TEXT so_number
+        TEXT status
+        TEXT cancelled_at
+        TEXT cancelled_by
+        TEXT proof_path
         TEXT created_at
         TEXT deleted_at
         TEXT deleted_by
         INTEGER hidden_with_customer
+    }
+
+    sales_orders {
+        INTEGER id PK
+        TEXT so_number UK
+        TEXT document_date
+        TEXT order_date
+        TEXT shipment_date
+        TEXT promised_delivery_date
+        TEXT due_date
+        TEXT currency
+        TEXT sales_type
+        TEXT purchasing_type
+        TEXT salesperson
+        TEXT external_doc
+        TEXT credit_term
+        TEXT customer_po_no
+        TEXT sell_to_no
+        TEXT sell_to_name
+        TEXT sell_to_address
+        TEXT sell_to_contact
+        TEXT sell_to_phone
+        TEXT ship_to_name
+        TEXT ship_to_address
+        TEXT ship_to_contact
+        TEXT ship_to_phone
+        TEXT ship_to_email
+        REAL total
+        REAL discount
+        REAL net_amount
+        REAL vat
+        REAL grand_total
+        TEXT remark
+        INTEGER customer_id FK
+        TEXT created_at
+        TEXT updated_at
+        TEXT created_by
+        TEXT deleted_at
+        TEXT deleted_by
+    }
+
+    sales_order_lines {
+        INTEGER id PK
+        INTEGER sales_order_id FK
+        INTEGER line_no
+        TEXT item_no
+        TEXT description
+        TEXT requested_delivery_date
+        TEXT uom
+        TEXT location
+        REAL quantity
+        REAL unit_price
+        REAL discount
+        REAL amount
     }
 
     calls {
@@ -146,6 +208,8 @@ erDiagram
     cases ||--o{ calls : "จัดกลุ่มสาย"
     calls ||--o{ call_customer_links : "เชื่อมกับ"
     warranty_registrations ||--o{ call_customer_links : "อ้างอิง"
+    customers ||--o{ sales_orders : "สั่งซื้อ"
+    sales_orders ||--o{ sales_order_lines : "มีรายการสินค้า"
 ```
 
 ---
@@ -193,6 +257,8 @@ erDiagram
 | `phone` | เบอร์โทร UNIQUE |
 | `email`, `gender`, `date_of_birth` | ข้อมูลลูกค้า |
 | `address`, `subdistrict`, `district`, `city_province`, `country`, `postcode` | ที่อยู่ |
+| `nick_name` | ชื่อเล่น |
+| `channel` | ช่องทาง/แบรนด์ที่ลูกค้าติดต่อ (เช่น Omazz) |
 | `created_at` | เวลาสร้าง |
 | `deleted_at` | ว่าง = ใช้งานอยู่; มีค่า = ถูกซ่อน (soft delete) แถวไม่เคยถูกลบจริง |
 | `deleted_by` | username ที่กดซ่อน |
@@ -209,10 +275,48 @@ erDiagram
 | `channel`, `certificate_no`, `category`, `brand`, `model`, `size` | ข้อมูลสินค้า |
 | `sku`, `serial_no`, `label_no` | รหัสสินค้า |
 | `warranty_period_months` | ระยะประกัน |
-| `date_of_purchase`, `date_of_delivery`, `purchase_channel`, `order_number`, `expiry_date`, `remark` | รายละเอียดการซื้อ/รับประกัน |
+| `date_of_purchase`, `date_of_delivery`, `purchase_channel`, `order_number`, `expiry_date`, `remark` | รายละเอียดการซื้อ/รับประกัน (`order_number` = เลขคำสั่งซื้อของร้าน/marketplace) |
+| `so_number` | เลขที่ใบสั่งขายของบริษัท — อ้างถึง `sales_orders.so_number` ด้วยข้อความ (ไม่ใช่ FK เพราะทะเบียนอาจถูกบันทึกก่อนนำเข้า SO) |
+| `ref_id` | เลขอ้างอิงจากระบบลงทะเบียนรับประกันของบริษัท |
+| `status` | `active` / `cancelled` (ค่าเริ่มต้น `active`) — ยกเลิกแล้วยังแสดงในระบบพร้อมสถานะ ต่างจาก `deleted_at` ที่ซ่อนออกจากทุกหน้า |
+| `cancelled_at`, `cancelled_by` | เวลาและ username ที่กดยกเลิก (ล้างเมื่อเปิดใช้อีกครั้ง) |
+| `proof_path` | path ไฟล์หลักฐานการซื้อใน `data/warranty_proofs/` (ตั้งชื่อด้วย SHA-256 ของไฟล์; ไฟล์เก่าไม่ถูกลบเมื่ออัปโหลดใหม่) |
 | `created_at` | เวลาสร้าง |
 | `deleted_at`, `deleted_by` | soft delete เหมือน `customers` |
 | `hidden_with_customer` | 1 = ถูกซ่อนเพราะลูกค้าถูกซ่อน (กู้คืนพร้อมลูกค้า), 0 = Admin ซ่อนรายการนี้เอง (กู้คืนแยก) |
+
+### `sales_orders`
+
+หัวใบสั่งขาย (SO) ตามเอกสาร "ใบสั่งขาย" ของบริษัท (Dynamics NAV)
+
+| Column | Meaning |
+|---|---|
+| `id` | PK |
+| `so_number` | เลขที่ SO — UNIQUE, ใช้เป็นกุญแจตอนนำเข้าซ้ำ (อัปเดตแทนการสร้างใหม่) |
+| `document_date`, `order_date`, `shipment_date`, `promised_delivery_date`, `due_date` | วันที่เอกสาร / สั่งซื้อ / จัดส่ง / สัญญาส่ง / ครบกำหนด (ISO `YYYY-MM-DD`) |
+| `currency`, `sales_type`, `purchasing_type`, `salesperson`, `external_doc`, `credit_term`, `customer_po_no` | ข้อมูลการขาย |
+| `sell_to_no`, `sell_to_name`, `sell_to_address`, `sell_to_contact`, `sell_to_phone` | ผู้ซื้อ (Sell-to) |
+| `ship_to_name`, `ship_to_address`, `ship_to_contact`, `ship_to_phone`, `ship_to_email` | ผู้รับ / ที่อยู่จัดส่ง (Ship-to) |
+| `total`, `discount`, `net_amount`, `vat`, `grand_total` | ยอดรวม, ส่วนลดท้ายบิล, ยอดหลังหักส่วนลด, VAT, ยอดรวมสุทธิ — ค่าที่ว่างคำนวณจากรายการสินค้า |
+| `remark` | หมายเหตุ |
+| `customer_id` | FK → `customers.id` — ผูกอัตโนมัติจากเบอร์ผู้รับ แล้วเบอร์ผู้ซื้อ, หรือ Admin ผูกเอง (ว่างได้) |
+| `created_at`, `updated_at`, `created_by` | เวลาสร้าง/แก้ล่าสุด, ผู้สร้าง |
+| `deleted_at`, `deleted_by` | soft delete เหมือน `customers` |
+
+### `sales_order_lines`
+
+| Column | Meaning |
+|---|---|
+| `id` | PK |
+| `sales_order_id` | FK → `sales_orders.id` (`ON DELETE CASCADE` — แต่ระบบไม่ลบ SO จริง ใช้ซ่อนแทน) |
+| `line_no` | ลำดับ |
+| `item_no` | รหัสสินค้า/บาร์โค้ด |
+| `description` | รายละเอียดสินค้า |
+| `requested_delivery_date` | วันที่ต้องการรับ |
+| `uom`, `location` | หน่วย, คลัง/สถานที่ |
+| `quantity`, `unit_price`, `discount`, `amount` | จำนวน, ราคาต่อหน่วย, ส่วนลด (จำนวนเงิน), จำนวนเงิน |
+
+> การบันทึก SO ซ้ำ (นำเข้าใหม่หรือแก้ในฟอร์ม) จะแทนที่รายการสินค้าทั้งชุดของ SO นั้น
 
 ### `audit_log`
 
@@ -221,8 +325,8 @@ erDiagram
 | `id` | PK |
 | `actor` | ใครทำ — ชื่อที่แสดงของบัญชี; ถ้าเป็น `login_failed` คือข้อความที่พิมพ์ในช่อง username (ยังไม่รู้ว่าเป็นใคร) |
 | `actor_role` | role ณ ตอนนั้น (ว่างสำหรับ `login_failed`) |
-| `action` | `create` / `update` / `delete` (ลูกค้า/ทะเบียน = ซ่อน) / `restore` / `login` / `login_failed` / `logout` |
-| `entity` | `customer` / `warranty` / `user` / `call` / `case` / `session` / `settings` |
+| `action` | `create` / `update` / `delete` (ลูกค้า/ทะเบียน/SO = ซ่อน) / `restore` / `login` / `login_failed` / `logout` / `claim` / `release` / `cancel` / `reactivate` (สถานะทะเบียน) / `import` (นำเข้า SO จากไฟล์ — 1 แถวต่อการนำเข้า พร้อมจำนวนและเลขที่ SO) |
+| `entity` | `customer` / `warranty` / `sales_order` / `user` / `call` / `case` / `session` / `settings` |
 | `entity_id` | id ของแถวที่ถูกกระทำ (ว่างได้ เช่น settings) |
 | `entity_label` | ชื่อ ณ ตอนนั้น — ชื่อลูกค้า, เลขทะเบียน, ชื่อไฟล์, หัวข้อเคส, หรือ username สำหรับ `user` / `session` |
 | `changes` | JSON — `{field: [ก่อน, หลัง]}` สำหรับ update, snapshot สำหรับ create/delete; ค่า `password` / `password_hash` / `hf_token` ถูกแทนด้วย `***` |
@@ -288,6 +392,8 @@ erDiagram
 | cases → calls | 1 : N |
 | calls → call_customer_links | 1 : N |
 | warranty_registrations → call_customer_links | 1 : N |
+| customers → sales_orders | 1 : N (SO ที่ยังไม่ผูกลูกค้า `customer_id` ว่าง) |
+| sales_orders → sales_order_lines | 1 : N |
 
 `users` และ `audit_log` **ไม่มี foreign key** ไปตารางอื่นโดยตั้งใจ — `audit_log` เก็บ `entity` + `entity_id` + `entity_label` (ชื่อ ณ เวลานั้น) และ `actor` เป็นข้อความ เพื่อให้ประวัติยังอ่านได้ครบแม้ข้อมูลต้นทางจะถูกแก้ชื่อหรือถูกซ่อนภายหลัง
 
@@ -314,6 +420,10 @@ erDiagram
 `_migrate_soft_delete()` ทำแบบเดียวกันกับ `customers` (`deleted_at`, `deleted_by`) และ
 `warranty_registrations` (`deleted_at`, `deleted_by`, `hidden_with_customer`) ส่วน `users` และ `audit_log`
 สร้างด้วย `CREATE TABLE IF NOT EXISTS` (บัญชี `admin` เริ่มต้นถูกสร้างตอนเปิดแอป ถ้ายังไม่มีบัญชีใดเลย)
+
+`_migrate_warranty_fields()` เติม `nick_name`, `channel` ให้ `customers` และ `ref_id`, `so_number`,
+`status` (ค่าเริ่มต้น `'active'`), `cancelled_at`, `cancelled_by`, `proof_path` ให้ `warranty_registrations`
+ส่วน `sales_orders` / `sales_order_lines` สร้างด้วย `CREATE TABLE IF NOT EXISTS`
 
 ดังนั้นการเปิด DB เก่าด้วยแอปเวอร์ชันใหม่จะค่อย ๆ เติม column ที่ขาดให้เอง โดยข้อมูลเดิมยังอยู่ครบ
 (`deleted_at` เป็น NULL = ทุกแถวเดิมถือว่ายังใช้งานอยู่)

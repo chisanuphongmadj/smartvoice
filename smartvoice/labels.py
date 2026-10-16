@@ -63,7 +63,36 @@ FIELD_TH = {
     "bulk": "ลบหลายไฟล์พร้อมกัน",
     "source": "ที่มาของบัญชี",
     "locked": "ถูกล็อก",
+    "nick_name": "ชื่อเล่น",
+    "channel": "ช่องทาง",
+    "ref_id": "Ref Id",
+    "so_number": "เลขที่ SO",
+    "proof_path": "หลักฐานการซื้อ",
+    "order_number": "เลขที่คำสั่งซื้อ",
+    "purchase_channel": "ช่องทางที่ซื้อ",
+    "date_of_delivery": "วันที่ส่งมอบ",
+    "label_no": "Label No.",
+    "sku": "SKU",
+    "category": "ประเภทสินค้า",
+    "remark": "หมายเหตุ",
+    "country": "ประเทศ",
+    "order_date": "วันที่สั่งซื้อ",
+    "document_date": "วันที่เอกสาร",
+    "shipment_date": "วันที่จัดส่ง",
+    "promised_delivery_date": "วันที่สัญญาส่ง",
+    "due_date": "วันครบกำหนด",
+    "sell_to_name": "ชื่อผู้ซื้อ",
+    "ship_to_name": "ชื่อผู้รับ",
+    "ship_to_phone": "เบอร์ผู้รับ",
+    "grand_total": "ยอดรวมสุทธิ",
+    "lines": "รายการสินค้า",
+    "created": "เพิ่มใหม่",
+    "updated": "อัปเดต",
+    "skipped": "ข้าม",
+    "file": "ไฟล์",
 }
+
+WARRANTY_STATUS_TH = {"active": "ใช้งาน (Active)", "cancelled": "ยกเลิก (Cancel)"}
 
 _BANGKOK = timezone(timedelta(hours=7))
 
@@ -117,6 +146,21 @@ def sentiment(code: str | None) -> str:
 
 def severity(code: str | None) -> str:
     return SEVERITY_TH.get(code or "", "ไม่ระบุ")
+
+
+def warranty_status(code: str | None) -> str:
+    """Rows from before the status column existed are active."""
+    return WARRANTY_STATUS_TH.get(code or "active", code or "-")
+
+
+def baht(amount, empty: str = "-") -> str:
+    """1234.5 → '1,234.50' (amounts are shown like the SO document)."""
+    if amount is None or amount == "":
+        return empty
+    try:
+        return f"{float(amount):,.2f}"
+    except (TypeError, ValueError):
+        return str(amount)
 
 
 def field(name: str) -> str:
