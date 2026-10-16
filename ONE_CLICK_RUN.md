@@ -59,18 +59,23 @@ OLLAMA_MODEL=scb10x/llama3.1-typhoon2-8b-instruct
 ollama pull scb10x/llama3.1-typhoon2-8b-instruct
 ```
 
-เข้าสู่ระบบ แล้วที่หน้าแรกกดขยาย `Deployment readiness` เพื่อตรวจสถานะระบบ (ผลถูก cache ไว้ 5 นาที — กด "ตรวจสอบใหม่" ถ้าเพิ่งแก้อะไรไป)
+เข้าสู่ระบบ แล้วที่หน้าแรกกดขยาย `ตรวจความพร้อมของระบบ (สำหรับผู้ดูแล)` เพื่อตรวจสถานะระบบ (ผลถูก cache ไว้ 5 นาที — กด "ตรวจสอบใหม่" ถ้าเพิ่งแก้อะไรไป)
 
 ## Demo mode
 
 ถ้าเครื่องไม่มี GPU หรือยังไม่มี HuggingFace access:
 
 1. เข้าสู่ระบบด้วยบัญชี `Admin` หรือ `Supervisor`
-2. เข้า `Settings`
-3. เลือก `Use Demo Laptop Mode`
+2. เข้า `ตั้งค่าระบบ`
+3. กด `โหมดสาธิต (ไม่ต้องใช้ GPU)`
 4. Restart แอป
 
 ในโหมดนี้ระบบยังเปิดใช้งาน UI และ flow upload ได้ โดยใช้ mock transcript แทน STT จริง
+
+## ตั้งค่าเพิ่มเติม (ไม่บังคับ)
+
+- **แจ้งเตือน Discord** เมื่อมีคนรับ/คืน/ปิดเคส — ใส่ Webhook URL ที่ `ตั้งค่าระบบ` → `แจ้งเตือน Discord` แล้วกด `ส่งข้อความทดสอบ`
+- **รายงาน PDF** ใช้ฟอนต์ไทยในเครื่อง (Windows มี Tahoma อยู่แล้ว) — บน macOS/Linux ถ้าปุ่ม `รายงาน PDF` กดไม่ได้ ให้ติดตั้งฟอนต์ไทยหรือตั้ง `REPORT_FONT_PATH=` ใน `.env`
 
 ## Authentication
 
@@ -109,7 +114,8 @@ SMARTVOICE_USERS=admin|Admin|pbkdf2_sha256$...
 - `data/raw_audio`
 - `data/models`
 - `data/logs`
-- local DB เช่น `data/smartvoice.db` — นอกจากข้อมูลลูกค้าแล้ว ในนี้ยังมีบัญชีพนักงานและ `audit_log` (ชื่อผู้ใช้, ชื่อลูกค้า, ประวัติการใช้งาน) ด้วย
+- `data/warranty_proofs` (รูปใบเสร็จ/สลิปของลูกค้าจริง)
+- local DB เช่น `data/smartvoice.db` — นอกจากข้อมูลลูกค้าแล้ว ในนี้ยังมีใบสั่งขาย, บัญชีพนักงาน และ `audit_log` (ชื่อผู้ใช้, ชื่อลูกค้า, ประวัติการใช้งาน) ด้วย
 - `smartvoice.egg-info` และ `*.egg-info`
 - `.claude/`, `.worktrees/`, `.pytest_cache/`, `.pytest_tmp/`
 - temporary reports เช่น `_anomaly_report.txt`

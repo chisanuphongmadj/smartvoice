@@ -7,6 +7,7 @@ from datetime import date, datetime
 
 import pandas as pd
 import pytest
+from streamlit.testing.v1 import AppTest
 
 from smartvoice import audit, customer_entry, db, file_manager, labels, sales_orders as so
 
@@ -371,9 +372,6 @@ def test_save_proof_file_checks_content_and_dedups(tmp_path, monkeypatch):
 
 
 # ── Pages ────────────────────────────────────────────────────────────────
-
-from streamlit.testing.v1 import AppTest  # noqa: E402
-
 
 def _signed_in(at: AppTest, role: str) -> AppTest:
     at.session_state["current_user"] = "ทดสอบ"

@@ -6,7 +6,6 @@ full evidence for that row in a dialog — long quotes in table cells had to be
 clicked open one by one.
 """
 
-import json
 import math
 from collections import defaultdict
 
@@ -15,12 +14,9 @@ import streamlit as st
 
 st.set_page_config(page_title="SmartVoice — ผลงานพนักงาน", layout="wide")
 
-from smartvoice import db, labels
+from smartvoice import dashboard_report, db, labels
 from smartvoice.auth import PAGE_AGENT_PERFORMANCE
-from smartvoice.case_workflow import next_action_steps
 from smartvoice.dashboard_common import inject_dashboard_css, load_filtered_calls
-from smartvoice.file_manager import extract_agent_code_from_filename, extract_call_time_from_filename
-from smartvoice.ollama_client import sanitize_evidence, sanitize_next_action
 from smartvoice.ui_helpers import TABLE_CLICK_MODES, init_page, metric_card, picked_row
 
 init_page(PAGE_AGENT_PERFORMANCE)
@@ -36,64 +32,10 @@ st.caption(
     "ต่ำกว่า 6 = ควรช่วยดู, 6–7.9 = พอใช้, 8 ขึ้นไป = ดี"
 )
 
-UNKNOWN_AGENT = "ไม่ทราบรหัส"
+UNKNOWN_AGENT = dashboard_report.UNKNOWN_AGENT
 
-
-def _evidence(value: str, transcript: str = "") -> str:
-    text = " ".join(str(value or "").split())
-    return sanitize_evidence(text, transcript) or "ระบบไม่พบหลักฐานที่ชัดเจน"
-
-
-def _score_value(value) -> float:
-    try:
-        score = float(value)
-    except (TypeError, ValueError):
-        score = 0.0
-    return max(0.0, min(5.0, score))
-
-
-def _when(filename: str, created_at) -> str:
-    """Call time from the file name (when the call happened); upload time otherwise."""
-    called = extract_call_time_from_filename(filename)
-    if called:
-        return called.strftime("%d/%m/%Y %H:%M น.")
-    return labels.thai_time(created_at)
-
-
-# ── One entry per scored call ────────────────────────────────────────────
-scored_calls = []
-for call in done_calls:
-    raw = call.get("agent_performance") or ""
-    try:
-        ap = json.loads(raw) if raw else {}
-    except (json.JSONDecodeError, TypeError):
-        ap = {}
-    if not isinstance(ap, dict) or not ap.get("overall_score"):
-        continue
-    transcript = call.get("transcript") or ""
-    next_action, owner = sanitize_next_action(
-        ap.get("next_action") or "", ap.get("next_action_owner") or "", transcript
-    )
-    politeness = _score_value(ap.get("politeness", 0))
-    problem_solving = _score_value(ap.get("problem_solving", 0))
-    called = extract_call_time_from_filename(call["filename"])
-    scored_calls.append({
-        "call_id": call["id"],
-        "case_id": call.get("case_id"),
-        "filename": call["filename"],
-        "phone": call.get("customer_phone") or "",
-        "topic": call.get("topic_detail") or call.get("topic") or "-",
-        "sort_key": called.isoformat() if called else str(call.get("created_at") or ""),
-        "when": _when(call["filename"], call.get("created_at")),
-        "agent": extract_agent_code_from_filename(call["filename"]) or UNKNOWN_AGENT,
-        "politeness": politeness,
-        "problem_solving": problem_solving,
-        "score": politeness + problem_solving,
-        "politeness_evidence": _evidence(ap.get("politeness_evidence", ""), transcript),
-        "problem_solving_evidence": _evidence(ap.get("problem_solving_evidence", ""), transcript),
-        "next_steps": next_action_steps(next_action),
-        "owner": "" if owner in {"", "ไม่มี", "—", "-"} else owner,
-    })
+# One entry per scored call — the same maths as the exported report.
+scored_calls = dashboard_report.scored_calls(done_calls)
 
 if not scored_calls:
     st.info("ยังไม่มีคะแนนพนักงานในสายที่เลือก — สายที่ประมวลผลแล้วจะมีคะแนนอัตโนมัติ")
@@ -105,17 +47,7 @@ by_agent: dict[str, list] = defaultdict(list)
 for entry in scored_calls:
     by_agent[entry["agent"]].append(entry)
 
-agent_summary = pd.DataFrame([
-    {
-        "รหัสพนักงาน": agent,
-        "จำนวนสาย": len(entries),
-        "คะแนนเฉลี่ย": round(sum(e["score"] for e in entries) / len(entries), 1),
-        "ความสุภาพ": round(sum(e["politeness"] for e in entries) / len(entries), 1),
-        "การแก้ปัญหา": round(sum(e["problem_solving"] for e in entries) / len(entries), 1),
-        "สายต่ำกว่า 6": sum(1 for e in entries if e["score"] < 6),
-    }
-    for agent, entries in by_agent.items()
-]).sort_values(["คะแนนเฉลี่ย", "จำนวนสาย"], ascending=[False, False])
+agent_summary = dashboard_report.agent_summary(scored_calls)
 
 team_avg = sum(e["score"] for e in scored_calls) / len(scored_calls)
 low_calls = sum(1 for e in scored_calls if e["score"] < 6)

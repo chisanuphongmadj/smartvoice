@@ -8,15 +8,15 @@ filters picked on one page carry over to the next.
 
 from __future__ import annotations
 
-import json
-from collections import Counter
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from smartvoice import db, insight_rules, labels
+from smartvoice import audit, dashboard_report, db, labels
+from smartvoice.dashboard_report import count_list_field  # noqa: F401 — used by the Insights page
+from smartvoice.ui_helpers import get_current_user
 
 # ── Page CSS ─────────────────────────────────────────────────────────────
 
@@ -131,39 +131,6 @@ def hbar(
 
 # Names saved by older prompts are grouped under today's canonical spelling,
 # so "Lotus", "โลตัส" and "Lotus/โลตัส" are one bar, not three.
-_CANONICAL_FIELDS = {
-    "brand_mentions": insight_rules.BRAND_ALIASES,
-    "platform_mentions": insight_rules.PLATFORM_ALIASES,
-}
-# Every call is a phone call; older prompts listed it as a sales channel.
-_IGNORED_VALUES = {"platform_mentions": {"โทรศัพท์", "phone"}}
-
-
-def count_list_field(calls: list[dict], field: str, top: int = 15) -> list[tuple[str, int]]:
-    """Most common strings across a JSON-list column (keywords, brand_mentions, ...).
-
-    Each name counts once per call, after canonicalisation.
-    """
-    aliases = _CANONICAL_FIELDS.get(field)
-    ignored = _IGNORED_VALUES.get(field, set())
-    counter: Counter = Counter()
-    for call in calls:
-        raw = call.get(field) or ""
-        try:
-            items = json.loads(raw) if raw else []
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if not isinstance(items, list):
-            continue
-        names = {
-            insight_rules.canonical_name(i, aliases) if aliases else i.strip()
-            for i in items
-            if isinstance(i, str) and i.strip() and i.strip().lower() not in ignored
-        }
-        counter.update(names)
-    return counter.most_common(top)
-
-
 # ── Shared filters ───────────────────────────────────────────────────────
 
 # ทางบริษัทมีไฟล์เสียงหลักหมื่น — โหลดทั้งตารางทุกครั้งจะหน่วงระบบ
@@ -287,7 +254,8 @@ def load_filtered_calls() -> tuple[pd.DataFrame, int]:
     if st.session_state.get(KEY_SENTIMENT) not in SENTIMENT_OPTIONS:
         st.session_state[KEY_SENTIMENT] = ALL
 
-    with st.expander(f"ตัวกรอง: {_filter_summary()}", expanded=False):
+    filter_col, export_col = st.columns([3, 1])
+    with filter_col, st.expander(f"ตัวกรอง: {_filter_summary()}", expanded=False):
         f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1, 1.2])
         with f_col1:
             st.date_input(
@@ -333,4 +301,76 @@ def load_filtered_calls() -> tuple[pd.DataFrame, int]:
     if df.empty:
         st.warning("ไม่พบข้อมูลที่ตรงกับตัวกรองที่เลือก")
         st.stop()
+    with export_col:
+        render_export_menu(df)
     return df, total_in_db
+
+
+# ── Export ───────────────────────────────────────────────────────────────
+
+def _logged_export(kind: str, build, calls: int, filter_text: str):
+    """Wrap a file builder so the download is written to the audit trail.
+
+    The builder runs only when the button is clicked (Streamlit's deferred
+    download data), so pages don't pay for a PDF nobody asked for. The user is
+    captured now because the click is served outside the page run.
+    """
+    user, role = get_current_user()
+
+    def run():
+        data = build()
+        audit.record(
+            action=audit.EXPORT, entity=audit.ENTITY_REPORT, entity_label=kind,
+            actor=user, actor_role=role,
+            changes={"format": kind, "calls": calls, "filter": filter_text},
+        )
+        return data
+
+    return run
+
+
+def render_export_menu(df: pd.DataFrame) -> None:
+    """"ส่งออกรายงาน" — PDF report, summary CSV and call-list CSV of the current filter."""
+    calls = df.to_dict("records")
+    filter_text = _filter_summary()
+    stamp = datetime.now(timezone(timedelta(hours=7))).strftime("%Y%m%d_%H%M")
+    has_font = dashboard_report.find_thai_font() is not None
+
+    def report():
+        return dashboard_report.build_report(calls, filter_text)
+
+    with st.popover("ส่งออกรายงาน", icon=":material/download:", width="stretch"):
+        st.caption(f"ใช้ข้อมูลตามตัวกรองตอนนี้ — {len(calls):,} สาย")
+        st.download_button(
+            "รายงาน PDF",
+            data=_logged_export("PDF", lambda: dashboard_report.pdf_report(report()), len(calls), filter_text),
+            file_name=f"smartvoice_dashboard_{stamp}.pdf",
+            mime="application/pdf",
+            on_click="ignore",
+            icon=":material/picture_as_pdf:",
+            width="stretch",
+            key="export_pdf",
+            disabled=not has_font,
+            help=None if has_font else "ไม่พบฟอนต์ภาษาไทยในเครื่อง — ตั้งค่า REPORT_FONT_PATH ใน .env",
+        )
+        st.download_button(
+            "สรุปตัวเลข (CSV)",
+            data=_logged_export("CSV สรุป", lambda: dashboard_report.summary_csv(report()), len(calls), filter_text),
+            file_name=f"smartvoice_summary_{stamp}.csv",
+            mime="text/csv",
+            on_click="ignore",
+            icon=":material/table_chart:",
+            width="stretch",
+            key="export_summary_csv",
+        )
+        st.download_button(
+            "รายการสาย (CSV)",
+            data=_logged_export("CSV รายการสาย", lambda: dashboard_report.calls_csv(calls), len(calls), filter_text),
+            file_name=f"smartvoice_calls_{stamp}.csv",
+            mime="text/csv",
+            on_click="ignore",
+            icon=":material/list_alt:",
+            width="stretch",
+            key="export_calls_csv",
+        )
+        st.caption("PDF = กราฟและตารางทุกหน้า Dashboard · CSV เปิดใน Excel ได้ (ภาษาไทยไม่เพี้ยน)")

@@ -41,6 +41,12 @@ MOCK_STT = _get_bool("MOCK_STT", "false")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "scb10x/llama3.1-typhoon2-8b-instruct")
 
+# ── Reports ──────────────────────────────────────────────────────────────
+# Thai TrueType font for the Dashboard PDF. Blank = use the first one found
+# among the usual system fonts (Tahoma / Leelawadee on Windows, Noto Sans Thai
+# or TLWG fonts on Linux).
+REPORT_FONT_PATH = os.getenv("REPORT_FONT_PATH", "")
+
 # ── Database ─────────────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "data/smartvoice.db")
 

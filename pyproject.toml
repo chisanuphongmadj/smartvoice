@@ -22,6 +22,9 @@ dependencies = [
     "noisereduce",
     "scipy",
     "huggingface_hub",
+    "openpyxl",
+    "fpdf2",
+    "uharfbuzz",
 ]
 
 [project.scripts]

@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 471 tests, must pass 100% before every commit.
+**Current test baseline:** 492 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -54,6 +54,7 @@ ollama serve
 | `ui_helpers.py` | Shared CSS, login page, `init_page(page_key)` role guard, badges, processing launchers |
 | `customer_entry.py` | Validation + create/update/hide/restore rules for the manual data-entry page (phone normalisation, duplicate guards that skip the row being edited, warranty expiry maths); writes its own audit entries through `audit.record()` — no Streamlit import, so it is unit-testable. Also `set_warranty_status()` (Active/Cancel) |
 | `sales_orders.py` | Sales orders (SO): `FIELDS` (Thai template header + NAV English aliases per column), `read_upload()` (xlsx/csv, finds the header row, cp874 fallback), `parse_import()` (one row per line → orders grouped by SO number, row-numbered errors), value parsers (พ.ศ. dates, `1,234.50`, Excel-stripped leading 0), `complete_totals()`, `import_orders()` (upsert + one `import` audit entry), `save_manual()` / `hide()` / `restore()` / `link_customer()`, `template_bytes()`. No Streamlit import — see **Sales orders (SO)** |
+| `dashboard_report.py` | Dashboard export — `build_report()` → `pdf_report()` (fpdf2 + HarfBuzz Thai shaping, bars drawn as rectangles, own `wrap_text()`), `summary_csv()`, `calls_csv()` (utf-8-sig, formula-safe cells). Also owns the agent-score maths (`scored_calls`, `agent_summary`) that `10_Agent_Performance.py` imports, and `count_list_field()`. No Streamlit import |
 | `customer_view.py` | Customers page tables (`customer_rows`, `warranty_rows`, warranty state/expiry) and `render_customer_detail()` — the dialog opened by clicking a customer or warranty row |
 | `so_view.py` | Streamlit rendering of an SO laid out like the company's "ใบสั่งขาย" — used by the SO page, the Customers page and the Cases dialog (`render_customer_orders()`) |
 | `insight_rules.py` | Deterministic checks on every LLM answer before it is saved — quote verification, QA scoring, next-action assembly, sentiment guard, anomaly verification + keyword backstop, brand/platform canonicalisation, topic clamping. See **LLM analysis** |
@@ -74,6 +75,7 @@ The Dashboard used to be one ~1,000-line page; the professor found it too hard t
 
 - Every Dashboard page calls `dashboard_common.load_filtered_calls()` — one shared filter bar (date / topic / sentiment / load limit). Each page draws its own copy of the widgets and Streamlit does **not** carry a widget's value to the same key on another page (it silently falls back to the first option). So the real values live in `_keep_*` session keys: `restore_filters()` writes them back on **every** run before the widgets draw, and each widget has `on_change=remember_filters` so a change is saved before the next restore. Saved date ranges are clamped to the loaded calls because `st.date_input` raises when its value is outside min/max.
 - Chart styling (`CHART_LAYOUT`, palettes, `hbar()`) lives in `dashboard_common` too — new charts should use it rather than copy the Plotly settings.
+- **ส่งออกรายงาน** sits next to the filter bar on every Dashboard page (`dashboard_common.render_export_menu()`, drawn by `load_filtered_calls()`): PDF report, summary CSV, call-list CSV of the current filter. Files are built only on click — `st.download_button(data=callable, on_click="ignore")` — and the callable writes an `export` audit entry with the user captured at render time (the click is served outside the page run). Numbers come from `dashboard_report`, never a second copy of a page's maths.
 - `11_Cases.py` reads cases straight from SQL, then only the calls of the cases on screen (`db.get_calls_for_cases()`, one query). Case subjects are just the first call's broad topic, so the table and panel show `case_workflow.case_brief()` instead — latest summary, specific problem type, next step, urgency — so staff know what they are claiming.
 
 ### Speaker correction pipeline (`pipeline.py:1408-1459`)
@@ -256,6 +258,7 @@ readable on `pages/7_📜_Audit_Log.py` (Admin + Supervisor):
 | `case_workflow` | case claim / release / status change (Cases + Admin pages both call it via `ui_helpers.render_case_ownership()`) |
 | `sales_orders` | SO import (one `import` entry per file), create, update (header diff + line count), hide, restore, customer link |
 | `customer_entry.set_warranty_status()` | warranty `cancel` / `reactivate` |
+| `dashboard_common.render_export_menu()` | Dashboard PDF / CSV downloads (`export`, entity `report`) |
 | `pages/4_Settings.py` | `.env` saves and the Quick Mode presets |
 
 Rules that keep the trail trustworthy:
@@ -335,6 +338,7 @@ Key behaviors:
 - **Typhoon 8B copies whatever the prompt shows**: example actions ("ติดตามการโอนเงินคืน"), placeholder text (`<เบอร์ที่ลูกค้าให้ไว้>`), brand lists, *and pre-filled JSON answer templates* (a skeleton with `"done": false` / `"pending": false` came back unchanged). Describe the keys in words instead of showing a filled skeleton, give no concrete example values, and verify in `insight_rules`. Keep `sanitize_next_action()` in the display path for older DB rows.
 - **One request, one job.** Bundling the next action into the QA request made the model drop it; it is its own request now.
 - **Common Whisper errors:** "โอมาสนา"/"โนโลตัส"/"ฟิวทู" for brand names; "ที่โน่น"/"ทีเนี่ย" for "ที่นอน"; Thai phone numbers often mixed Thai/Arabic digits.
+- **fpdf2 hangs on Thai with `WrapMode.CHAR`** — `multi_cell` never returns on a long Thai run with no spaces at full width. The report wraps lines itself (`dashboard_report.wrap_text()`, never splitting a consonant from its vowel/tone marks) and draws each line with `cell()`. Text copied out of the PDF comes out reordered (side effect of HarfBuzz shaping); the printed text is correct.
 - **PowerShell:** Never use `cd` — set `Cwd` parameter instead.
 - **Imports** must be at the top of every file; never mid-file.
 - **Never slice Thai text to a character count** (`summary[:100]`). Thai has no spaces between words, so the cut always lands mid-word — show the text in full and let it wrap.
@@ -362,5 +366,6 @@ Configure via `smartvoice/.env` (copy from `.env.example`). Key variables:
 - `DB_PATH` — defaults to `data/smartvoice.db`
 - `CASE_RECENCY_HOURS` — window for recency-based case attachment
 - `DISCORD_WEBHOOK_URL` — case claim/close notifications (blank = off)
+- `REPORT_FONT_PATH` — Thai `.ttf` for the PDF report (blank = Tahoma / Leelawadee / Noto Sans Thai / TLWG, first found; none → the PDF button is disabled)
 
 `data/` and `.env` are gitignored (runtime data + secrets).

@@ -90,6 +90,9 @@ FIELD_TH = {
     "updated": "อัปเดต",
     "skipped": "ข้าม",
     "file": "ไฟล์",
+    "calls": "จำนวนสาย",
+    "filter": "ตัวกรอง",
+    "format": "รูปแบบ",
 }
 
 WARRANTY_STATUS_TH = {"active": "ใช้งาน (Active)", "cancelled": "ยกเลิก (Cancel)"}

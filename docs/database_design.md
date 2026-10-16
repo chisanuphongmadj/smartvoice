@@ -325,8 +325,8 @@ erDiagram
 | `id` | PK |
 | `actor` | ใครทำ — ชื่อที่แสดงของบัญชี; ถ้าเป็น `login_failed` คือข้อความที่พิมพ์ในช่อง username (ยังไม่รู้ว่าเป็นใคร) |
 | `actor_role` | role ณ ตอนนั้น (ว่างสำหรับ `login_failed`) |
-| `action` | `create` / `update` / `delete` (ลูกค้า/ทะเบียน/SO = ซ่อน) / `restore` / `login` / `login_failed` / `logout` / `claim` / `release` / `cancel` / `reactivate` (สถานะทะเบียน) / `import` (นำเข้า SO จากไฟล์ — 1 แถวต่อการนำเข้า พร้อมจำนวนและเลขที่ SO) |
-| `entity` | `customer` / `warranty` / `sales_order` / `user` / `call` / `case` / `session` / `settings` |
+| `action` | `create` / `update` / `delete` (ลูกค้า/ทะเบียน/SO = ซ่อน) / `restore` / `login` / `login_failed` / `logout` / `claim` / `release` / `cancel` / `reactivate` (สถานะทะเบียน) / `import` (นำเข้า SO จากไฟล์ — 1 แถวต่อการนำเข้า พร้อมจำนวนและเลขที่ SO) / `export` (ดาวน์โหลดรายงาน Dashboard — รูปแบบ, จำนวนสาย, ตัวกรอง) |
+| `entity` | `customer` / `warranty` / `sales_order` / `report` / `user` / `call` / `case` / `session` / `settings` |
 | `entity_id` | id ของแถวที่ถูกกระทำ (ว่างได้ เช่น settings) |
 | `entity_label` | ชื่อ ณ ตอนนั้น — ชื่อลูกค้า, เลขทะเบียน, ชื่อไฟล์, หัวข้อเคส, หรือ username สำหรับ `user` / `session` |
 | `changes` | JSON — `{field: [ก่อน, หลัง]}` สำหรับ update, snapshot สำหรับ create/delete; ค่า `password` / `password_hash` / `hf_token` ถูกแทนด้วย `***` |

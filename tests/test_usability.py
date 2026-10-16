@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from smartvoice import audit
 from smartvoice import dashboard_common as dc
 from smartvoice import db, file_manager, labels
 
@@ -304,3 +305,35 @@ def test_transcript_already_labelled_by_role_is_shown_in_thai(monkeypatch):
 
 def test_temp_db_fixture_is_isolated(temp_db):
     assert os.environ["DB_PATH"].startswith(str(temp_db))
+
+
+DASHBOARD_PAGE_FILES = (
+    "pages/2_📊_Dashboard.py",
+    "pages/8_Dashboard_Insights.py",
+    "pages/9_Dashboard_Anomaly.py",
+    "pages/10_Agent_Performance.py",
+    "pages/12_Call_Summaries.py",
+)
+
+
+@pytest.mark.parametrize("page", DASHBOARD_PAGE_FILES)
+def test_every_dashboard_page_offers_pdf_and_csv_export(temp_db, page):
+    _scored_call(1, "104", 5, 4)
+    at = _signed_in(AppTest.from_file(page, default_timeout=30), "Agent")
+    # st.page_link needs the router's page registry, which a lone page run lacks.
+    with mock.patch("streamlit.page_link"):
+        at.run()
+
+    assert not at.exception
+    buttons = at.get("download_button")
+    labels_shown = {b.proto.label for b in buttons}
+    assert {"รายงาน PDF", "สรุปตัวเลข (CSV)", "รายการสาย (CSV)"} <= labels_shown, page
+
+
+def test_a_dashboard_download_is_written_to_the_audit_trail(temp_db):
+    with mock.patch.object(dc, "get_current_user", lambda: ("สมศรี", "QA")):
+        build = dc._logged_export("CSV รายการสาย", lambda: b"data", 12, "ทุกหัวข้อ")
+    assert build() == b"data"
+    rows = db.get_audit_log(limit=5)
+    entry = next(r for r in rows if r["action"] == audit.EXPORT)
+    assert entry["actor"] == "สมศรี" and entry["entity"] == audit.ENTITY_REPORT
