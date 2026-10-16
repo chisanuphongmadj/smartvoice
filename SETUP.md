@@ -72,7 +72,7 @@ pip install -r requirements.txt
 pip install -e . --no-deps
 ```
 
-> อัปเดตจากเวอร์ชันก่อน: รัน `pip install -r requirements.txt` อีกครั้ง — มีแพ็กเกจใหม่ `openpyxl` (นำเข้า SO จาก Excel), `fpdf2` และ `uharfbuzz` (รายงาน PDF ภาษาไทย) ฐานข้อมูลเดิมจะถูกเพิ่มตาราง/คอลัมน์ใหม่ให้เองตอนเปิดแอป ข้อมูลเดิมไม่เปลี่ยน
+> อัปเดตจากเวอร์ชันก่อน: ถ้าเปิดด้วย `run.bat` / `run.sh` launcher ติดตั้งให้เอง (รัน `pip install -r requirements.txt` ทุกครั้งที่เปิด); ถ้าติดตั้งแบบ Manual ให้รัน `pip install -r requirements.txt` อีกครั้ง — มีแพ็กเกจใหม่ `openpyxl` (นำเข้า SO จาก Excel), `fpdf2` และ `uharfbuzz` (รายงาน PDF ภาษาไทย) ฐานข้อมูลเดิมจะถูกเพิ่มตาราง/คอลัมน์ใหม่ให้เองตอนเปิดแอป ข้อมูลเดิมไม่เปลี่ยน
 
 ### 3. ตั้งค่า `.env`
 

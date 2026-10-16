@@ -16,7 +16,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - ไฟล์สร้างตอนกดเท่านั้น (หน้า Dashboard ไม่ช้าลง) และทุกการดาวน์โหลดบันทึกในประวัติการใช้งาน
 - หน้าผลงานพนักงานกับรายงานใช้สูตรคะแนนชุดเดียวกัน (`smartvoice/dashboard_report.py`)
 - ตั้งฟอนต์ไทยของ PDF ได้ด้วย `REPORT_FONT_PATH` (ว่าง = ใช้ Tahoma / Leelawadee ในเครื่อง)
-- ต้องติดตั้งแพ็กเกจเพิ่ม: `fpdf2`, `uharfbuzz` (อยู่ใน `requirements.txt` แล้ว)
+- แพ็กเกจใหม่ `fpdf2`, `uharfbuzz` — `run.bat` / `run.sh` ติดตั้งให้เองตอนเปิด (ติดตั้งแบบ Manual ให้รัน `pip install -r requirements.txt`)
 
 ### Changed — เอกสาร
 - อัปเดต `README.md`, `SETUP.md`, `AGENTS.md`, `ONE_CLICK_RUN.md`, `docs/architecture.md`, `docs/OMAZZ_RELEASE_CHECKLIST.md` ให้ตรงกับระบบปัจจุบัน (รับเคส + Discord, Dashboard แยกหน้า, การตรวจคำตอบ AI, ใบสั่งขาย, ส่งออกรายงาน, ชื่อเมนูภาษาไทย)
@@ -32,7 +32,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - หน้าลูกค้าและหน้าต่างรายละเอียดเคส แสดง SO ของลูกค้า (สั่งเมื่อไร ส่งเมื่อไร กี่รายการ ยอดเท่าไร) — พนักงานที่รับเคสเห็นทันทีว่าลูกค้าซื้ออะไรไป
 - ทุกการนำเข้า/เพิ่ม/แก้ไข/ซ่อน/กู้คืน SO และการยกเลิก/เปิดใช้ทะเบียนบันทึกลงประวัติการใช้งาน
 - ฐานข้อมูล: ตารางใหม่ `sales_orders`, `sales_order_lines` และคอลัมน์ใหม่ใน `customers` / `warranty_registrations` — migration เพิ่มคอลัมน์อย่างเดียว ข้อมูลเดิมไม่เปลี่ยน (ทะเบียนเดิมมีสถานะ "ใช้งาน")
-- ต้องติดตั้งแพ็กเกจเพิ่ม: `openpyxl` (อยู่ใน `requirements.txt` แล้ว)
+- แพ็กเกจใหม่ `openpyxl` — `run.bat` / `run.sh` ติดตั้งให้เองตอนเปิด (ติดตั้งแบบ Manual ให้รัน `pip install -r requirements.txt`)
 
 ### Changed — ปรับ prompt ทั้งหมดให้ได้ insight ที่ถูกต้อง (ทดสอบกับสายจริง 11 สาย)
 - **หลักการใหม่: AI เสนอ แต่ระบบตรวจก่อนบันทึก** (`smartvoice/insight_rules.py`) — AI ตอบเป็นส่วน ๆ พร้อมคำพูดอ้างอิง แล้ว Python ตรวจว่าคำพูดนั้นมีอยู่ในสายจริงก่อนให้คะแนน/ติดธง

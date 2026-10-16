@@ -163,7 +163,7 @@ streamlit run Home.py
 
 ดูรายละเอียดเต็มใน [`SETUP.md`](SETUP.md) และคู่มือส่งต่อเครื่องใน [`ONE_CLICK_RUN.md`](ONE_CLICK_RUN.md)
 
-> อัปเดตจากเวอร์ชันก่อน: รัน `pip install -r requirements.txt` อีกครั้ง (เพิ่ม `openpyxl`, `fpdf2`, `uharfbuzz`) — ฐานข้อมูลเดิมจะถูกเพิ่มตาราง/คอลัมน์ใหม่ให้เองตอนเปิดแอป ข้อมูลเดิมไม่เปลี่ยน
+> อัปเดตจากเวอร์ชันก่อน: ถ้าเปิดด้วย `run.bat` / `run.sh` ไม่ต้องทำอะไร — launcher รัน `pip install -r requirements.txt` ทุกครั้งที่เปิด จึงติดตั้งแพ็กเกจใหม่ (`openpyxl`, `fpdf2`, `uharfbuzz`) ให้เอง; ถ้าเปิดด้วย `streamlit run Home.py` ให้รันคำสั่งนั้นเองหนึ่งครั้ง — ฐานข้อมูลเดิมจะถูกเพิ่มตาราง/คอลัมน์ใหม่ให้เองตอนเปิดแอป ข้อมูลเดิมไม่เปลี่ยน
 
 ## Core Environment Variables
 
