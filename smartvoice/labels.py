@@ -93,6 +93,9 @@ FIELD_TH = {
     "calls": "จำนวนสาย",
     "filter": "ตัวกรอง",
     "format": "รูปแบบ",
+    "finished": "เสร็จแล้ว (ไฟล์)",
+    "not_finished": "ยังไม่เสร็จ (ไฟล์)",
+    "files": "จำนวนไฟล์",
 }
 
 WARRANTY_STATUS_TH = {"active": "ใช้งาน (Active)", "cancelled": "ยกเลิก (Cancel)"}

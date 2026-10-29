@@ -3,7 +3,7 @@ import os
 import re
 import requests
 
-from smartvoice import insight_rules
+from smartvoice import insight_rules, processing_control
 from smartvoice.logger import get_logger
 
 log = get_logger(__name__)
@@ -43,6 +43,8 @@ def _num_ctx() -> int:
 def chat(
     system_prompt: str, user_prompt: str, *, temperature: float = 0, json_mode: bool = False
 ) -> str:
+    # Each request can take a minute — the Admin stop button takes effect here.
+    processing_control.check()
     url = f"{_base_url()}/api/chat"
     payload = {
         "model": _model(),

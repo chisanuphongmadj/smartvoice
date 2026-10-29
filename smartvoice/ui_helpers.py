@@ -10,7 +10,7 @@ import time
 import streamlit as st
 
 from smartvoice import audit as audit_trail
-from smartvoice import case_workflow, db, labels, pipeline
+from smartvoice import case_workflow, db, labels, pipeline, processing_control
 from smartvoice.auth import (
     DEFAULT_ADMIN_PASSWORD,
     DEFAULT_ADMIN_USERNAME,
@@ -658,12 +658,18 @@ def launch_processing(call_id: int) -> None:
             return
         db.update_call_status(call_id, "processing")
 
+    processing_control.begin([call_id])
+
     def _run():
         try:
             pipeline.process_call(call_id)
+        except processing_control.ProcessingCancelled:
+            pass  # pipeline already put the call back to 'uploaded'
         except Exception:
             # Already logged + DB status marked 'error' inside pipeline
             log.error("Background processing crashed for call_id=%s", call_id)
+        finally:
+            processing_control.finish()
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -686,16 +692,26 @@ def launch_processing_queue(call_ids: list) -> list | None:
             db.update_call_status(call_id, "processing")
             queued_ids.append(call_id)
 
+    processing_control.begin(queued_ids)
+
     def _run_queue():
         global _queue_running
         try:
             for cid in queued_ids:
+                if processing_control.stop_requested():
+                    break
                 try:
                     pipeline.process_call(cid)
+                except processing_control.ProcessingCancelled:
+                    break
                 except Exception:
                     # Already logged + DB marked 'error' inside pipeline — continue queue
                     log.error("Queue item failed for call_id=%s — continuing", cid)
         finally:
+            # Stopped: the calls that never started were marked 'processing'
+            # up front — put them back in the queue.
+            db.reset_calls_to_uploaded(queued_ids)
+            processing_control.finish()
             with _queue_lock:
                 _queue_running = False
 

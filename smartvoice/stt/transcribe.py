@@ -531,6 +531,8 @@ def transcribe_hf(audio, sr: int, log_fn) -> list[dict]:
 
     all_words: list[dict] = []
     for ci in range(n_chunks):
+        # One message per chunk — also the stop button's checkpoint on long calls.
+        log_fn(f"→ chunk {ci + 1}/{n_chunks}")
         chunk_start_s = ci * _HF_CHUNK_SECONDS
         start_sample = ci * chunk_samples
         end_sample = min(start_sample + chunk_samples, len(audio))

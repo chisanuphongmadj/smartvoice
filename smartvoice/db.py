@@ -475,6 +475,51 @@ def get_processing_calls() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_calls_progress(call_ids: list[int]) -> list[dict]:
+    """Light rows for the live run panel on the Admin page, in `call_ids` order.
+
+    Polled every few seconds, so it skips the transcript and other long text.
+    """
+    if not call_ids:
+        return []
+    placeholders = ",".join("?" * len(call_ids))
+    conn = get_connection()
+    rows = conn.execute(
+        f"""
+        SELECT id, filename, status, processing_step, topic, topic_detail,
+               sentiment, anomaly_detected, anomaly_severity, updated_at
+        FROM calls WHERE id IN ({placeholders})
+        """,
+        list(call_ids),
+    ).fetchall()
+    conn.close()
+    by_id = {r["id"]: dict(r) for r in rows}
+    return [by_id[cid] for cid in call_ids if cid in by_id]
+
+
+def reset_calls_to_uploaded(call_ids: list[int]) -> int:
+    """Put stopped calls back in the queue ('processing' → 'uploaded').
+
+    No error_msg: the Admin page shows any error_msg as a failure, and a call
+    the user stopped didn't fail. Rows that already left 'processing' are left alone.
+    """
+    if not call_ids:
+        return 0
+    placeholders = ",".join("?" * len(call_ids))
+    conn = get_connection()
+    with conn:
+        cur = conn.execute(
+            f"""
+            UPDATE calls
+            SET status = 'uploaded', processing_step = NULL, error_msg = NULL, updated_at = ?
+            WHERE status = 'processing' AND id IN ({placeholders})
+            """,
+            [_now(), *call_ids],
+        )
+    conn.close()
+    return cur.rowcount
+
+
 def get_call_by_id(call_id: int) -> dict | None:
     conn = get_connection()
     row = conn.execute("SELECT * FROM calls WHERE id = ?", (call_id,)).fetchone()

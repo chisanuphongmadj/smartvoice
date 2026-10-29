@@ -30,7 +30,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
 ```
 
-**Current test baseline:** 492 tests, must pass 100% before every commit.
+**Current test baseline:** 508 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -59,6 +59,7 @@ ollama serve
 | `so_view.py` | Streamlit rendering of an SO laid out like the company's "ใบสั่งขาย" — used by the SO page, the Customers page and the Cases dialog (`render_customer_orders()`) |
 | `insight_rules.py` | Deterministic checks on every LLM answer before it is saved — quote verification, QA scoring, next-action assembly, sentiment guard, anomaly verification + keyword backstop, brand/platform canonicalisation, topic clamping. See **LLM analysis** |
 | `audit.py` | Audit-trail vocabulary + `record()` — action/entity constants, Thai labels, secret redaction, `diff_fields()`. Every page logs through it (`ui_helpers.audit()` fills in the signed-in user) |
+| `processing_control.py` | Stop button + live-run state for background processing: `begin()`/`finish()` per job, `request_stop()`, `check()` (raises `ProcessingCancelled`, a **BaseException** so the STT/LLM `except Exception` fallbacks can't swallow it), `uninterruptible()` around saving results, `run_call_ids()` for the Admin live panel. No Streamlit import — see **Stopping processing** |
 | `case_workflow.py` | Case ownership rules — `claim()` / `release()` / `change_status()`; only the claimer changes status, Admin/Supervisor may release (not take) someone's claim, QA can't claim. Logs to audit + notifies Discord. No Streamlit import |
 | `labels.py` | Thai words for every code shown on screen (`call_status()`, `case_status()`, `sentiment()`, `field()` for audit-log field names) and `thai_time()` — UTC ISO → `dd/mm/yyyy HH:MM น.` in UTC+7. No Streamlit import |
 | `discord_notify.py` | Discord incoming-webhook sender (`DISCORD_WEBHOOK_URL`); background thread, never raises, `allowed_mentions` off, phone masked to last 4 digits |
@@ -172,7 +173,7 @@ Normal complaints resolved politely = negative sentiment, **not** anomaly.
 These pages avoid loading rows they don't display, so they stay responsive at 10K+ uploads:
 
 - **Home** (`Home.py`): the four cards come from `count_calls_by_status()`. Counting with `get_all_calls()` (a `SELECT *`) pulled every transcript into memory — measured ~278 ms and ~57 MB per page view at 5,000 calls. The readiness checks are wrapped in `@st.cache_data(ttl=300)` because an expander body runs even while collapsed and those checks hit Ollama/HuggingFace over the network (~2.6 s); together this took a home render from 2.9 s to 0.2 s at 5,000 calls.
-- **Admin** (`pages/1_📤_Admin.py`): top metric cards read from `count_calls_by_status()` (SQL `GROUP BY`) so they're accurate even when only the latest-N rows are loaded for display. Load-limit picker defaults to `200 ล่าสุด` when total > 200, else `ทั้งหมด`. "Process All Pending" uses `get_pending_call_ids()` (lazy) so old pending calls aren't missed. The `@st.fragment(run_every=3)` auto-refresh queries only `get_processing_calls()` (typically 0-1 rows) instead of the full table.
+- **Admin** (`pages/1_📤_Admin.py`): top metric cards read from `count_calls_by_status()` (SQL `GROUP BY`) so they're accurate even when only the latest-N rows are loaded for display. Load-limit picker defaults to `200 ล่าสุด` when total > 200, else `ทั้งหมด`. "Process All Pending" uses `get_pending_call_ids()` (lazy) so old pending calls aren't missed. The `@st.fragment(run_every=3)` live panel (`_live_run_panel`) reads only the current run's rows via `db.get_calls_progress()` (no transcripts) plus `get_processing_calls()`, and reruns the whole page only when another call finishes.
 - **Dashboard** (all pages via `dashboard_common.load_filtered_calls()`): load-limit picker defaults to `1,000 ล่าสุด` when total > 1000, else `ทั้งหมด`. Analytics signal quality matters more here than first-paint speed, so the default is larger than on Admin.
 
 ## Filename-derived filters
@@ -254,7 +255,7 @@ readable on `pages/7_📜_Audit_Log.py` (Admin + Supervisor):
 | `ui_helpers` login flow | `login`, `login_failed`, `logout`, self-service password change |
 | `customer_entry` | customer / warranty create, update, hide, restore |
 | `pages/5_👤_Users.py` | account create, role & status change (enable/disable) |
-| `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case subject/merge |
+| `pages/1_📤_Admin.py` | call upload & delete, manual customer link, case subject/merge, stop processing (`cancel`), requeue stuck calls |
 | `case_workflow` | case claim / release / status change (Cases + Admin pages both call it via `ui_helpers.render_case_ownership()`) |
 | `sales_orders` | SO import (one `import` entry per file), create, update (header diff + line count), hide, restore, customer link |
 | `customer_entry.set_warranty_status()` | warranty `cancel` / `reactivate` |
@@ -300,6 +301,14 @@ ship sample rows that look real; the Excel template has headers only).
   (jpg/png/webp/pdf), ≤10 MB, named by SHA-256 under `data/warranty_proofs/`; old
   proofs are never removed (audit rows point at them).
 - Customers gained `nick_name` and `channel`.
+
+## Stopping processing + live results (Admin page)
+
+- Processing runs in daemon threads in the Streamlit process; `processing_control` is plain module state, so a stop pressed in one browser stops the run for everyone.
+- Stopping is cooperative — checkpoints are every `pipeline._step()`, every STT progress message (the transformers backend logs once per 15 s chunk), and every `ollama_client.chat()` request. Worst-case delay is one chunk / one LLM request / one Pyannote run.
+- A stopped call goes back to `uploaded` with **no** `error_msg` (`db.reset_calls_to_uploaded()`) — the Admin page shows any `error_msg` as a failure. The queue puts back the calls it marked `processing` up front but never started.
+- Saving results + case assignment run inside `processing_control.uninterruptible()`: case matching asks Ollama, and a stop there would leave a `done` call with no case.
+- The live panel lists the run's calls as they finish and lets staff open each finished call's summary/transcript right away (a selectbox, not a dialog — the 3 s fragment rerun would close a dialog). It also offers "คืนสถานะไฟล์ที่ค้าง" when calls are `processing` but nothing runs in this server (app was closed mid-call), instead of waiting `PROCESSING_STALE_MINUTES`.
 
 ## Case ownership (claim / no stealing / Discord)
 

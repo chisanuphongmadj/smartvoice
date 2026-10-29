@@ -3,7 +3,7 @@ import re
 import time
 import traceback
 from datetime import datetime, timedelta, timezone
-from smartvoice import db, ollama_client
+from smartvoice import db, ollama_client, processing_control
 from smartvoice.config import CASE_RECENCY_HOURS
 from smartvoice.logger import get_logger
 from smartvoice.stt import transcribe_diarized as _transcribe_diarized
@@ -1349,14 +1349,21 @@ def process_call(call_id: int, step_callback=None) -> dict:
     _start = time.time()
 
     def _step(msg: str):
+        processing_control.check()
         db.update_processing_step(call_id, msg)
         if step_callback:
             step_callback(msg)
 
+    def _stt_progress(msg: str):
+        # STT reports every load / chunk / diarization stage — stop checkpoints.
+        processing_control.check()
+        if step_callback:
+            step_callback(msg)
+
     try:
-        _step("🎙 [1/4] กำลังถอดเสียงและแยกผู้พูด (WhisperX)...")
+        _step("🎙 [1/4] กำลังถอดเสียงและแยกผู้พูด (Whisper + Pyannote)...")
         raw_segments = _transcribe_diarized(
-            call["file_path"], step_callback=step_callback
+            call["file_path"], step_callback=_stt_progress
         )
 
         MERGE_GAP_SEC = 0.2
@@ -1524,31 +1531,11 @@ def process_call(call_id: int, step_callback=None) -> dict:
         )
 
         _step("💾 กำลังบันทึกผล...")
-        db.update_call_results(
-            call_id=call_id,
-            transcript=transcript,
-            summary=analysis["summary"],
-            sentiment=analysis["sentiment"],
-            topic=analysis["topic"],
-            speaker_mapping=analysis.get("speaker_mapping", ""),
-            agent_performance=analysis.get("agent_performance", ""),
-            keywords=analysis.get("keywords", ""),
-            brand_mentions=analysis.get("brand_mentions", ""),
-            platform_mentions=analysis.get("platform_mentions", ""),
-            anomaly_detected=analysis.get("anomaly_detected", False),
-            anomaly_reason=analysis.get("anomaly_reason", ""),
-            sentiment_reason=analysis.get("sentiment_reason", ""),
-            anomaly_severity=analysis.get("anomaly_severity", ""),
-            topic_detail=analysis.get("topic_detail", ""),
-        )
-
-        # ── Auto Case Assignment ──
-        _step("📂 กำลังจัดกลุ่มเคส...")
-        _auto_assign_case(call_id, analysis)
-
-        elapsed = time.time() - _start
-        elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{int(elapsed)}s"
-        _step(f"✅ เสร็จสิ้น ใช้เวลา {elapsed_str}")
+        with processing_control.uninterruptible():
+            _save_results_and_case(call_id, transcript, analysis, _step)
+            elapsed = time.time() - _start
+            elapsed_str = f"{int(elapsed // 60)}m {int(elapsed % 60)}s" if elapsed >= 60 else f"{int(elapsed)}s"
+            _step(f"✅ เสร็จสิ้น ใช้เวลา {elapsed_str}")
 
         return {
             "call_id": call_id,
@@ -1559,8 +1546,38 @@ def process_call(call_id: int, step_callback=None) -> dict:
             **analysis,
         }
 
+    except processing_control.ProcessingCancelled:
+        log.info("process_call stopped by user for call_id=%s", call_id)
+        db.reset_calls_to_uploaded([call_id])
+        raise
+
     except Exception as exc:
         error_msg = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
         log.exception("process_call failed for call_id=%s", call_id)
         db.update_call_status(call_id, "error", error_msg=error_msg)
         raise
+
+
+def _save_results_and_case(call_id: int, transcript: str, analysis: dict, step) -> None:
+    """Write the analysis and attach the call to a case — one unit, never stopped halfway."""
+    db.update_call_results(
+        call_id=call_id,
+        transcript=transcript,
+        summary=analysis["summary"],
+        sentiment=analysis["sentiment"],
+        topic=analysis["topic"],
+        speaker_mapping=analysis.get("speaker_mapping", ""),
+        agent_performance=analysis.get("agent_performance", ""),
+        keywords=analysis.get("keywords", ""),
+        brand_mentions=analysis.get("brand_mentions", ""),
+        platform_mentions=analysis.get("platform_mentions", ""),
+        anomaly_detected=analysis.get("anomaly_detected", False),
+        anomaly_reason=analysis.get("anomaly_reason", ""),
+        sentiment_reason=analysis.get("sentiment_reason", ""),
+        anomaly_severity=analysis.get("anomaly_severity", ""),
+        topic_detail=analysis.get("topic_detail", ""),
+    )
+
+    # ── Auto Case Assignment ──
+    step("📂 กำลังจัดกลุ่มเคส...")
+    _auto_assign_case(call_id, analysis)

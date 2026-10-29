@@ -4,7 +4,7 @@ import streamlit as st
 st.set_page_config(page_title="SmartVoice — อัปโหลดและประมวลผลเสียง", layout="wide")
 
 from smartvoice import audit as audit_trail
-from smartvoice import case_workflow, db, file_manager, labels
+from smartvoice import case_workflow, db, file_manager, labels, processing_control
 from smartvoice.auth import PAGE_ADMIN, role_label
 from smartvoice.file_manager import extract_direction_from_filename
 from smartvoice.preflight import get_ollama_readiness, ollama_setup_lines
@@ -232,6 +232,194 @@ if process_all_btn and _counts["uploaded"] > 0:
     st.session_state.just_launched.update(queued or [])
     st.rerun()
 
+
+def _render_live_result(call_id: int) -> None:
+    """Result of one finished call, readable while the rest of the run continues."""
+    call = db.get_call_by_id(call_id)
+    if not call:
+        st.caption("ไม่พบสายนี้แล้ว — อาจถูกลบไป")
+        return
+    if call["status"] == "error":
+        st.error(
+            "ไฟล์นี้ประมวลผลไม่สำเร็จ — กด *ประมวลผล* ที่ไฟล์นี้ในรายการด้านล่างเพื่อลองใหม่  \n"
+            f"รายละเอียด: {(call.get('error_msg') or '-').splitlines()[0]}"
+        )
+        return
+    st.caption(
+        f"เรื่อง: {call.get('topic_detail') or call.get('topic') or '-'}  •  "
+        f"อารมณ์ลูกค้า: {labels.sentiment(call.get('sentiment'))}"
+    )
+    if call.get("anomaly_detected"):
+        (st.error if call.get("anomaly_severity") == "high" else st.warning)(
+            f"ความผิดปกติ ({labels.severity(call.get('anomaly_severity'))}): "
+            f"{call.get('anomaly_reason') or 'ไม่ระบุสาเหตุ'}"
+        )
+    st.markdown("**สรุปสาย**")
+    st.write(call.get("summary") or "ยังไม่มีสรุป")
+    if call.get("sentiment_reason"):
+        st.caption(f"เหตุผลที่ประเมินอารมณ์ลูกค้า: {call['sentiment_reason']}")
+    with st.expander("บทสนทนาแยกผู้พูด"):
+        render_transcript(call)
+    st.page_link(
+        "pages/12_Call_Summaries.py",
+        label="ดูรายละเอียดเต็ม (สิ่งที่ต้องทำต่อ คะแนนพนักงาน) ที่หน้ารายการสาย",
+        icon=":material/open_in_new:",
+    )
+
+
+def _remember_live_pick() -> None:
+    st.session_state["_live_pick_id"] = st.session_state.get("_live_pick")
+
+
+@st.fragment(run_every=3)
+def _live_run_panel():
+    """Progress of the current run, its stop button, and each result as soon as it is ready.
+
+    Re-drawn every 3 s on its own; the whole page reruns only when another
+    call finishes, so the counters and the call list below catch up too.
+    """
+    run_ids = processing_control.run_call_ids()
+    running = processing_control.is_running()
+    # A stopped run ends without another call finishing — rerun once so the
+    # counters and the list stop showing those calls as in progress.
+    was_running = st.session_state.get("_live_was_running", False)
+    st.session_state["_live_was_running"] = running
+    if was_running and not running:
+        st.rerun()
+
+    if not running:
+        # Nothing runs in this server, so any 'processing' row was left behind
+        # by a stop or crash (the app closed mid-call) — offer to requeue it now
+        # instead of waiting for the stale-processing recovery hours later.
+        stuck = db.get_processing_calls()
+        if stuck:
+            st_col1, st_col2 = st.columns([3, 1])
+            with st_col1:
+                st.warning(
+                    f"มี {len(stuck)} ไฟล์ค้างสถานะ \"กำลังประมวลผล\" แต่ไม่มีงานรันอยู่ "
+                    "(เช่น ปิดโปรแกรมระหว่างประมวลผล) — คืนสถานะเป็นรอประมวลผลเพื่อสั่งใหม่ได้"
+                )
+            with st_col2:
+                if st.button("คืนสถานะไฟล์ที่ค้าง", use_container_width=True):
+                    reset = db.reset_calls_to_uploaded([c["id"] for c in stuck])
+                    audit(
+                        audit_trail.UPDATE,
+                        audit_trail.ENTITY_CALL,
+                        entity_label="คืนสถานะไฟล์ที่ค้างการประมวลผล",
+                        changes={"status": ["processing", "uploaded"], "files": reset},
+                    )
+                    _flash("success", f"คืนสถานะ {reset} ไฟล์เป็นรอประมวลผลแล้ว")
+                    st.rerun()
+
+    if not run_ids:
+        return
+
+    rows = db.get_calls_progress(run_ids)
+    finished = [r for r in rows if r["status"] in ("done", "error")]
+    finished_ids = {r["id"] for r in finished}
+    seen = st.session_state.get("_live_finished_seen")
+    st.session_state["_live_finished_seen"] = finished_ids
+    if seen is not None and finished_ids - seen:
+        st.rerun()
+
+    # The queue marks every call 'processing' up front but runs them one by
+    # one in queue order — only the first is actually being worked on.
+    current = next((r for r in rows if r["status"] == "processing"), None) if running else None
+
+    def _row_status(r: dict) -> str:
+        if r["status"] == "processing" and r is not current:
+            return "รอคิว"
+        return labels.call_status(r["status"])
+
+    with st.container(border=True):
+        if running:
+            st.progress(
+                len(finished) / len(rows) if rows else 0.0,
+                text=f"ประมวลผลแล้ว {len(finished)} / {len(rows)} ไฟล์",
+            )
+            if current:
+                st.info(
+                    f"กำลังประมวลผล `{current['filename']}`\n\n"
+                    f"**ขั้นตอนปัจจุบัน:** {current.get('processing_step') or 'กำลังเริ่มต้น...'}"
+                )
+            if processing_control.stop_requested():
+                st.warning(
+                    "กำลังหยุด — รอให้ขั้นตอนที่ทำอยู่จบก่อน (ไม่เกินหนึ่งช่วงเสียงหรือหนึ่งคำขอ AI) "
+                    "ไฟล์ที่ยังไม่เสร็จจะกลับเป็น \"รอประมวลผล\""
+                )
+            elif st.button("หยุดประมวลผล", type="secondary", icon=":material/stop_circle:"):
+                if processing_control.request_stop():
+                    pending = len(rows) - len(finished)
+                    audit(
+                        audit_trail.CANCEL,
+                        audit_trail.ENTITY_CALL,
+                        entity_label="หยุดประมวลผล",
+                        changes={"finished": len(finished), "not_finished": pending},
+                    )
+                    st.toast("ส่งคำสั่งหยุดแล้ว")
+                st.rerun(scope="fragment")
+        else:
+            done_n = sum(1 for r in rows if r["status"] == "done")
+            error_n = sum(1 for r in rows if r["status"] == "error")
+            left_n = len(rows) - done_n - error_n
+            sum_col, close_col = st.columns([3, 1])
+            with sum_col:
+                st.markdown(
+                    f"**รอบล่าสุด:** เสร็จ {done_n} ไฟล์  •  ผิดพลาด {error_n} ไฟล์"
+                    + (f"  •  ยังไม่ได้ประมวลผล {left_n} ไฟล์ (หยุดกลางคัน)" if left_n else "")
+                )
+            with close_col:
+                if st.button("ปิดรายการนี้", use_container_width=True):
+                    processing_control.clear_run()
+                    st.session_state.pop("_live_finished_seen", None)
+                    st.rerun()
+
+        st.dataframe(
+            [
+                {
+                    "สถานะ": _row_status(r),
+                    "ไฟล์": r["filename"],
+                    "เรื่อง": r.get("topic_detail") or r.get("topic") or "",
+                    "อารมณ์ลูกค้า": labels.sentiment(r.get("sentiment")) if r["status"] == "done" else "",
+                    "ความผิดปกติ": labels.severity(r.get("anomaly_severity"))
+                    if r.get("anomaly_detected") else "",
+                }
+                for r in rows
+            ],
+            hide_index=True,
+            width="stretch",
+            # CDR filenames are ~60 characters; at full width they push the
+            # result columns off screen.
+            column_config={
+                "สถานะ": st.column_config.TextColumn(width="small"),
+                "ไฟล์": st.column_config.TextColumn(width="medium"),
+            },
+        )
+
+        if finished:
+            # Options only grow during a run (in queue order), and the pick is
+            # kept in a plain key — so a call finishing never swaps what you read.
+            options = [r["id"] for r in finished]
+            names = {r["id"]: r["filename"] for r in finished}
+            remembered = st.session_state.get("_live_pick_id")
+            if remembered not in options:
+                remembered = options[-1]
+            st.selectbox(
+                "เปิดอ่านผลของไฟล์ที่เสร็จแล้ว",
+                options,
+                index=options.index(remembered),
+                format_func=lambda cid: names.get(cid, str(cid)),
+                key="_live_pick",
+                on_change=_remember_live_pick,
+            )
+            st.session_state["_live_pick_id"] = st.session_state.get("_live_pick", remembered)
+            _render_live_result(st.session_state["_live_pick_id"])
+        elif running:
+            st.caption("ผลของแต่ละไฟล์จะขึ้นที่นี่ทันทีที่ไฟล์นั้นเสร็จ ไม่ต้องรอให้ครบทุกไฟล์")
+
+
+_live_run_panel()
+
 # ── Orphan case cleanup ──
 _orphan_count = db.count_orphan_cases()
 if _orphan_count > 0:
@@ -296,7 +484,11 @@ else:
     # 'processing'. Use the same loaded subset (newest calls are the most
     # likely candidates; older just_launched ids are rare and will self-clear
     # on the next refresh when their status changes).
-    if "just_launched" in st.session_state:
+    if "just_launched" in st.session_state and not processing_control.is_running():
+        # Nothing runs (finished, stopped, or never started because Ollama was
+        # down) — a call stopped mid-run is 'uploaded' again, not in progress.
+        st.session_state.just_launched = set()
+    elif "just_launched" in st.session_state:
         _active_db_statuses = {c["id"]: c["status"] for c in refresh_calls}
         st.session_state.just_launched = {
             cid for cid in st.session_state.just_launched
@@ -691,25 +883,3 @@ else:
                 st.session_state._call_page_size = PAGE_SIZE
                 st.rerun()
 
-
-@st.fragment(run_every=3)
-def _auto_refresh_status():
-    # Scope to processing-only rows — this fragment runs every 3 seconds,
-    # so scanning the full calls table here is wasteful at 10K+ uploads.
-    active = db.get_processing_calls()
-
-    has_processing = bool(active)
-    if has_processing:
-        current = active[0]
-        step = current.get("processing_step") or "กำลังเริ่มต้น..."
-        remaining = len(active)
-        queue_info = f" (เหลือ {remaining} ไฟล์)" if remaining > 1 else ""
-        st.info(f"กำลังประมวลผล `{current['filename'][:40]}`{queue_info}\n\n**ขั้นตอนปัจจุบัน:** {step}")
-    else:
-        if st.session_state.get("_was_processing", False):
-            st.session_state["_was_processing"] = False
-            st.rerun()
-
-    st.session_state["_was_processing"] = has_processing
-
-_auto_refresh_status()
