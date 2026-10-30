@@ -274,7 +274,8 @@ def test_tables_have_no_checkbox_column():
 def test_tables_with_long_text_open_a_dialog_on_click():
     """Long summaries / evidence used to sit in narrow cells that had to be
     opened one by one; these pages show them in a dialog instead."""
-    for name in ("11_Cases.py", "12_Call_Summaries.py", "10_Agent_Performance.py", "7_📜_Audit_Log.py"):
+    for name in ("11_Cases.py", "12_Call_Summaries.py", "10_Agent_Performance.py", "7_📜_Audit_Log.py",
+                 "9_Dashboard_Anomaly.py"):
         page = (Path("pages") / name).read_text(encoding="utf-8")
         assert "selection_mode=TABLE_CLICK_MODES" in page, name
         assert "@st.dialog(" in page, name
@@ -337,3 +338,24 @@ def test_a_dashboard_download_is_written_to_the_audit_trail(temp_db):
     rows = db.get_audit_log(limit=5)
     entry = next(r for r in rows if r["action"] == audit.EXPORT)
     assert entry["actor"] == "สมศรี" and entry["entity"] == audit.ENTITY_REPORT
+
+
+def test_many_anomalies_show_as_a_paged_table_not_one_box_each(temp_db):
+    """Hundreds of anomalies used to draw hundreds of boxes down the page."""
+    for i in range(60):
+        call_id = db.insert_call(f"2025110417{i:04d}-1.1-104-08123456{i % 100:02d}-Inbound.wav", f"a{i}", f"data/a{i}.wav")
+        db.update_call_results(
+            call_id=call_id, transcript="Customer: ผื่นขึ้น", summary="s", sentiment="negative",
+            topic="แจ้งปัญหาสินค้า", anomaly_detected=True,
+            anomaly_severity=("high", "medium", "low")[i % 3], anomaly_reason=f"เหตุผล {i}",
+        )
+        db.update_call_status(call_id, "done")
+
+    at = _signed_in(AppTest.from_file("pages/9_Dashboard_Anomaly.py", default_timeout=30), "Agent")
+    at.run()
+
+    assert not at.exception
+    assert len(at.dataframe) == 1
+    assert len(at.dataframe[0].value) == 25                       # first page only
+    assert list(at.dataframe[0].value["ระดับ"])[:20] == ["รุนแรง"] * 20   # most severe first
+    assert len(at.warning) + len(at.error) == 0                    # no box per call

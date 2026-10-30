@@ -34,7 +34,7 @@ streamlit run Home.py       # → http://localhost:8501
 & ".venv\Scripts\python.exe" scripts\compare_llm_models.py --models <current> <candidate> [--limit N]
 ```
 
-**Current test baseline:** 518 tests, must pass 100% before every commit.
+**Current test baseline:** 519 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -326,7 +326,7 @@ ship sample rows that look real; the Excel template has headers only).
 - **Menu:** `Home._PAGE_SPECS` gives every page a Thai title and a `:material/...:` icon (`tests/test_usability.py` checks both), and `st.navigation(..., expanded=True)` — without it Streamlit hides links past the 10th behind "View more".
 - **Home page** is a work queue: unclaimed cases, my open cases, severe anomalies, each with an `st.page_link` shortcut. The case shortcuts pass `?owner=unassigned|mine`, which `11_Cases.py` applies once to its owner filter and then removes.
 - **Destructive actions ask first.** Deleting calls (one or many) and merging cases open an `@st.dialog` with "ลบถาวร"/"ยกเลิก". File removal goes through `file_manager.remove_audio_file()`, which reports a locked file instead of raising.
-- **Click any cell to read the row.** Tables with long text or a detail view (Cases, Call list, Agent Performance, Audit Log, Sales orders, Customers + their warranties) use `selection_mode=ui_helpers.TABLE_CLICK_MODES` (cell only — a click on any cell counts; row mode is left out because its checkbox column reopened the dialog when a box was un-ticked) and open an `@st.dialog(width="large")` with the full text. `ui_helpers.picked_row()` returns `(row, is_new)`; only a selection that gains something is new, so the dialog opens once per click — not on reruns, not on deselecting; each page also offers a "เปิด…อีกครั้ง" button.
+- **Click any cell to read the row.** Tables with long text or a detail view (Cases, Call list, Agent Performance, Anomalies, Audit Log, Sales orders, Customers + their warranties) use `selection_mode=ui_helpers.TABLE_CLICK_MODES` (cell only — a click on any cell counts; row mode is left out because its checkbox column reopened the dialog when a box was un-ticked) and open an `@st.dialog(width="large")` with the full text. `ui_helpers.picked_row()` returns `(row, is_new)`; only a selection that gains something is new, so the dialog opens once per click — not on reruns, not on deselecting; each page also offers a "เปิด…อีกครั้ง" button.
 - **Selections are row positions, not ids.** When an action reorders the table (claiming a case bumps its `updated_at`), the selection points at a different row. The Cases table key includes a hash of the row order so the selection resets, and the dialog re-opens by the remembered case id (`_case_dialog_case`) to show the result.
 - Transcripts render through `ui_helpers.render_transcript()` — labels [พนักงาน]/[ลูกค้า], HTML-escaped (the text comes from speech recognition).
 - Show **when the call happened** from `file_manager.extract_call_time_from_filename()`; `created_at` is only the upload time.
