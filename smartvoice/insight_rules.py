@@ -350,8 +350,8 @@ SEVERITY_BY_CATEGORY = {
     "C1": "medium", "C2": "medium", "C3": "low",
     "D1": "medium",
 }
-# Categories whose evidence must contain one of these words. B and D are
-# judged from context, so they only need a verified quote. Thai has no word
+# Categories whose evidence must contain one of these words. B has its own
+# check (misconduct_is_grounded); D only needs a verified quote. Thai has no word
 # breaks, so some words carry an exclusion: "แจ้งความต้องการ" (state one's
 # needs) is not "แจ้งความ" (file a police report) — a real call was flagged
 # as a legal threat for it.
@@ -384,6 +384,20 @@ CATEGORY_KEYWORDS = {
     "C2": ("น้ำท่วม", "ไฟไหม้", "อุทกภัย"),
     "C3": ("ค่าเสียหาย", "ชดเชย", "เยียวยา"),
 }
+# Agent misconduct is high severity, so a quote that merely exists is not
+# enough: on a real call the 12B model raised B2 for an agent and customer
+# sorting out an item name ("ไม่เห็นพ็อปเปอร์" — "เป็นผ้าปู ไม่ใช่พ็อปเปอร์").
+# B1/B3 need the rude or refusing words in the agent's quote; B2 needs the
+# customer to say they were told wrong — a plain "ไม่ใช่" is ordinary clarifying.
+_MISCONDUCT_WORDS = {
+    "B1": CATEGORY_KEYWORDS["A4"] + ("เรื่องของคุณ", "ช่างคุณ", "ฟังไม่รู้เรื่อง", "พูดไม่รู้เรื่อง", "โง่"),
+    "B3": ("ช่วยไม่ได้", "ไม่ใช่หน้าที่", "ไม่เกี่ยวกับเรา", "ไม่เกี่ยวกับทางเรา", "ไปติดต่อเอง",
+           "ไม่รับผิดชอบ", "วางสาย"),
+}
+_TOLD_WRONG_WORDS = (
+    "บอกผิด", "แจ้งผิด", "ให้ข้อมูลผิด", "ข้อมูลผิด", "บอกไม่ตรง", "แจ้งไม่ตรง", "พูดไม่ตรง",
+    "ไม่ตรงกับที่บอก", "ไม่ตรงกับที่แจ้ง", "ไม่เหมือนที่บอก", "ตอนแรกบอกว่า", "เมื่อกี้บอกว่า", "โกหก",
+)
 # Words strong enough to flag on their own when a CUSTOMER says them — the
 # model missed a rash/allergy complaint and a swearing customer on real calls.
 _BACKSTOP_KEYWORDS = {
@@ -451,6 +465,15 @@ def _infer_category(quote: str) -> str:
     return ""
 
 
+def misconduct_is_grounded(category: str, quote: str, conversation_text: str) -> bool:
+    """A B-category flag is backed by what the agent said (and, for B2, the customer's objection)."""
+    if not agent_said(quote, conversation_text):
+        return False
+    if category == "B2":
+        return has_keyword(speaker_text(conversation_text, "Customer"), _TOLD_WRONG_WORDS) is not None
+    return has_keyword(quote, _MISCONDUCT_WORDS[category]) is not None
+
+
 def verify_anomaly(result: dict, conversation_text: str) -> dict:
     """{anomaly_detected, anomaly_reason, anomaly_severity} after checking the evidence."""
     nothing = keyword_anomaly(conversation_text) or {
@@ -471,6 +494,8 @@ def verify_anomaly(result: dict, conversation_text: str) -> dict:
     category = found.group(1) if found and found.group(1) in SEVERITY_BY_CATEGORY else ""
     if category in CATEGORY_KEYWORDS and not has_keyword(quote, CATEGORY_KEYWORDS[category]):
         category = _infer_category(quote)   # wrong code, but the quote may fit another
+    if category.startswith("B") and not misconduct_is_grounded(category, quote, conversation_text):
+        category = _infer_category(quote)
     if not category:
         category = _infer_category(quote)
     if not category:

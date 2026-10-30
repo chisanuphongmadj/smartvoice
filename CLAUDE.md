@@ -28,9 +28,13 @@ streamlit run Home.py       # → http://localhost:8501
 
 # Backfill topic_detail for legacy "แจ้งปัญหาสินค้า" calls (dry-run by default)
 & ".venv\Scripts\python.exe" scripts\backfill_topic_detail.py [--apply]
+
+# Compare Ollama models on the 4 analyses over stored transcripts (DB opened read-only)
+# → data\llm_compare\<timestamp>\report.md (gitignored: it quotes real calls)
+& ".venv\Scripts\python.exe" scripts\compare_llm_models.py --models <current> <candidate> [--limit N]
 ```
 
-**Current test baseline:** 508 tests, must pass 100% before every commit.
+**Current test baseline:** 518 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -113,7 +117,7 @@ Every request → `extract_json()` → empty dict on failure (logs and continues
 - QA: an item counts only if its quote is something the agent said (`agent_said()`: not in a `Customer:` line, or in agent voice — diarization leaves agent words as "Speaker 0" or merged into customer lines). P2 (polite particles) is measured, not quoted. Score = share of applicable items (P3 only applies when the customer had a problem), 1-5. The old prompt scored every call 5/5.
 - Next action: `build_next_action()` joins todo | detail | deadline | follow-up, fills "ไม่ระบุในสาย (แนะนำ: …)" from the owner, strips template leftovers (`<...>`, `[บริบท]`); `money_action_is_ungrounded()` rejects a refund task on a call with no money talk (the old example "ติดตามการโอนเงินคืน" was copied onto unrelated calls).
 - Sentiment: `check_sentiment()` — positive needs a praise word in the customer's quote ("ขอบคุณครับ" alone was labelled positive); a swearing/explicitly displeased customer is never positive/neutral.
-- Anomaly: `verify_anomaly()` — the quote must occur in the call and contain a keyword of its category; severity comes from the category table. `keyword_anomaly()` is a backstop that scans **Customer lines only** for health words and profanity. Keywords are matched with `has_keyword()`, which knows Thai traps ("แจ้งความต้องการ" ≠ "แจ้งความ").
+- Anomaly: `verify_anomaly()` — the quote must occur in the call and contain a keyword of its category; severity comes from the category table. Agent misconduct (B, high severity) goes through `misconduct_is_grounded()`: the quote must be the agent's, B1/B3 need rude/refusing words in it, and B2 needs the customer to say they were told wrong ("บอกผิด", "ตอนแรกบอกว่า") — a plain "ไม่ใช่" is ordinary clarifying. `keyword_anomaly()` is a backstop that scans **Customer lines only** for health words and profanity. Keywords are matched with `has_keyword()`, which knows Thai traps ("แจ้งความต้องการ" ≠ "แจ้งความ").
 - Brands/platforms: `canonical_mentions()` keeps only names actually said (the company greeting "บริษัทที่นอนโลตัส" doesn't count) under one spelling; the dashboard regroups older rows with `canonical_name()`.
 - Topic: `normalize_topic()` clamps to the 9 topics.
 
@@ -346,6 +350,8 @@ Key behaviors:
 - **`created_at` in DB** = upload/process time, not the actual call date. Call date is in the filename: `YYYYMMDDHHMMSS-...`.
 - **Typhoon 8B copies whatever the prompt shows**: example actions ("ติดตามการโอนเงินคืน"), placeholder text (`<เบอร์ที่ลูกค้าให้ไว้>`), brand lists, *and pre-filled JSON answer templates* (a skeleton with `"done": false` / `"pending": false` came back unchanged). Describe the keys in words instead of showing a filled skeleton, give no concrete example values, and verify in `insight_rules`. Keep `sanitize_next_action()` in the display path for older DB rows.
 - **One request, one job.** Bundling the next action into the QA request made the model drop it; it is its own request now.
+- **`scb10x/typhoon2.1-gemma3-12b` won't load on Ollama 0.32.5** ("selectattr: unknown test 'tool_calls'"): the GGUF's Jinja chat template hits a llama.cpp parser bug, and a Modelfile `TEMPLATE` doesn't override it. The local workaround is a copy of the GGUF with that validation loop blanked out (same byte length), imported as `typhoon2.1-gemma3-12b-local`. In the 13-call comparison it wrote better summaries/topics, but answered `sentiment_reason` in English on 9/13 calls and wrote bare-verb todos ("รอ", "ประสาน"); telling every analysis prompt to write Thai and asking for "คำกริยา + ทำอะไร/กับใคร" fixed both (0/13 English) without changing the 8B's answers. It also raised a false high-severity B2 (agent misinformation) on an ordinary item-name mix-up, which led to the B-category check in `misconduct_is_grounded()`. It still takes ~2× as long as the 8B — not switched yet.
+- **Testing Ollama with Thai from Git Bash `curl` sends mangled text** and the model answers nonsense; test through Python (`ollama_client.chat`).
 - **Common Whisper errors:** "โอมาสนา"/"โนโลตัส"/"ฟิวทู" for brand names; "ที่โน่น"/"ทีเนี่ย" for "ที่นอน"; Thai phone numbers often mixed Thai/Arabic digits.
 - **fpdf2 hangs on Thai with `WrapMode.CHAR`** — `multi_cell` never returns on a long Thai run with no spaces at full width. The report wraps lines itself (`dashboard_report.wrap_text()`, never splitting a consonant from its vowel/tone marks) and draws each line with `cell()`. Text copied out of the PDF comes out reordered (side effect of HarfBuzz shaping); the printed text is correct.
 - **PowerShell:** Never use `cd` — set `Cwd` parameter instead.

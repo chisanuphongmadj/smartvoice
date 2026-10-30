@@ -17,6 +17,8 @@ data/*.db
 data/*.sqlite
 data/raw_audio/
 data/exports/
+# scripts/compare_llm_models.py reports quote real calls
+data/llm_compare/
 
 # Converted CTranslate2 models (large, regenerated on first run)
 data/models/

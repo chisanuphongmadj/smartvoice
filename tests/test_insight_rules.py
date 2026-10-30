@@ -196,6 +196,43 @@ def test_wrong_code_with_a_fitting_quote_is_recategorised():
     assert out["anomaly_severity"] == "medium" and out["anomaly_reason"].startswith("[C1]")
 
 
+def test_sorting_out_an_item_name_is_not_agent_misinformation():
+    # Real call (12B model): flagged high-severity B2 for this exchange.
+    call = (
+        "Agent: ครับ ก็เราไม่เห็นพ็อปเปอร์ของคุณลูกค้าเลยอะค่ะ อ่า\n"
+        "Customer: เป็นผ้าปู ไม่ใช่พ็อปเปอร์ ไม่ มันเป็นผ้าปู ผ้ารองกันเปื้อนครับ"
+    )
+    answer = {"anomaly_detected": True, "category": "B2", "evidence_quote": "ก็เราไม่เห็นพ็อปเปอร์ของคุณลูกค้าเลยอะค่ะ"}
+    assert not ir.verify_anomaly(answer, call)["anomaly_detected"]
+
+
+def test_agent_misinformation_needs_the_customer_to_say_they_were_told_wrong():
+    call = (
+        "Agent: ส่งได้วันจันทร์ค่ะ\n"
+        "Customer: ตอนแรกบอกว่าวันศุกร์ แล้วทำไมตอนนี้บอกไม่ตรงกัน"
+    )
+    out = ir.verify_anomaly({"anomaly_detected": True, "category": "B2", "evidence_quote": "ส่งได้วันจันทร์ค่ะ"}, call)
+    assert (out["anomaly_detected"], out["anomaly_severity"]) == (True, "high")
+    assert out["anomaly_reason"].startswith("[B2]")
+
+
+def test_rude_or_refusing_agent_needs_the_words_in_the_agents_quote():
+    call = (
+        "Agent: เรื่องของคุณ ทางเราไม่รับผิดชอบค่ะ\n"
+        "Customer: ทำไมพูดแบบนี้ ผมจะร้องเรียน\n"
+        "Agent: ขออภัยค่ะ เดี๋ยวตรวจสอบให้นะคะ"
+    )
+    rude = ir.verify_anomaly({"anomaly_detected": True, "category": "B1", "evidence_quote": "เรื่องของคุณ"}, call)
+    assert rude["anomaly_reason"].startswith("[B1]")
+    refused = ir.verify_anomaly({"anomaly_detected": True, "category": "B3", "evidence_quote": "ทางเราไม่รับผิดชอบค่ะ"}, call)
+    assert refused["anomaly_reason"].startswith("[B3]")
+    # A polite line is real but proves nothing; neither does the customer's own line.
+    polite = {"anomaly_detected": True, "category": "B1", "evidence_quote": "เดี๋ยวตรวจสอบให้นะคะ"}
+    assert not ir.verify_anomaly(polite, call)["anomaly_reason"].startswith("[B")
+    customer = {"anomaly_detected": True, "category": "B1", "evidence_quote": "ทำไมพูดแบบนี้ ผมจะร้องเรียน"}
+    assert ir.verify_anomaly(customer, call)["anomaly_reason"].startswith("[A2]")
+
+
 def test_legacy_reason_format_is_still_verified():
     call = "Customer: ถ้าไม่แก้ผมจะฟ้องเลยนะ"
     out = ir.verify_anomaly(
