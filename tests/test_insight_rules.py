@@ -44,6 +44,32 @@ def test_unlabelled_transcript_falls_back_to_all_text():
     assert ir.speaker_text("สวัสดีค่ะ\nครับ", "Agent") == "สวัสดีค่ะ\nครับ"
 
 
+# ── Speaker-correction splits ────────────────────────────────────────────
+
+SEGMENT = "ค่ะ คุณลูกค้า ค่ะ ต้องการติดตามคำร้องที่ส่งไปทางอีเมลค่ะ คุณลูกค้ามีแจ้งเกี่ยวกับเรื่องอะไรเข้ามานะคะ"
+
+
+def test_a_split_into_the_segments_own_words_is_kept():
+    assert ir.split_keeps_text(
+        ["ค่ะคุณลูกค้า", "ค่ะ ต้องการติดตามคำร้องที่ส่งไปทางอีเมลค่ะ", "คุณลูกค้ามีแจ้งเกี่ยวกับเรื่องอะไรเข้ามานะคะ"],
+        SEGMENT,
+    )
+    # fixing a particle is still the same speech
+    assert ir.split_keeps_text(["ค่ะ คุณลูกค้า", "ค่ะ ต้องการติดตามคำร้องที่ส่งไปทางอีเมลค่ะ คุณลูกค้ามีแจ้งเกี่ยวกับเรื่องอะไรเข้ามานะค่ะ"], SEGMENT)
+
+
+def test_a_split_filled_with_prompt_text_is_rejected():
+    # call 295: the model wrote its own prompt's agent cues into the transcript
+    leaked = 'สวัสดีครับ/ค่ะ [ชื่อบริษัท] ขอบคุณที่ติดต่อ... เรียกอีกฝ่ายว่า "คุณลูกค้า" ขอโทษในนามบริษัท ตั้งคำถาม'
+    assert not ir.split_keeps_text(["ค่ะ คุณลูกค้า", leaked], SEGMENT)
+    assert not ir.split_keeps_text([leaked + " ต้องการติดตามคำร้องที่ส่งไปทางอีเมลค่ะ"], SEGMENT)
+
+
+def test_a_split_that_drops_much_of_the_segment_is_rejected():
+    assert not ir.split_keeps_text(["ค่ะ คุณลูกค้า", "ค่ะ ต้องการติดตาม"], SEGMENT)
+    assert not ir.split_keeps_text([], SEGMENT)
+
+
 # ── QA scoring ───────────────────────────────────────────────────────────
 
 def test_score_counts_only_verified_items():

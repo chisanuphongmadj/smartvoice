@@ -49,6 +49,25 @@ def quote_in_text(quote: str, text: str) -> bool:
     return match.size >= max(MIN_QUOTE_CHARS, int(len(q) * QUOTE_MATCH_RATIO))
 
 
+SPLIT_MAX_ADDED = 0.1        # a split may fix a particle, not write new speech
+SPLIT_MIN_KEPT = 0.8         # ... nor drop a fifth of what was said
+
+
+def split_keeps_text(parts: list[str], segment: str) -> bool:
+    """True when the texts the model gave for a split segment are that segment's
+    own words, in order (ignoring spaces/punctuation).
+
+    The speaker-correction model once filled a split part with lines of its own
+    prompt ("สวัสดีครับ/ค่ะ [ชื่อบริษัท] ... เรียกอีกฝ่ายว่า "คุณลูกค้า"") in place
+    of what the customer said.
+    """
+    joined, source = _squash("".join(parts)), _squash(segment)
+    if not joined or not source:
+        return False
+    matched = sum(b.size for b in SequenceMatcher(None, joined, source, autojunk=False).get_matching_blocks())
+    return (len(joined) - matched) <= len(joined) * SPLIT_MAX_ADDED and matched >= len(source) * SPLIT_MIN_KEPT
+
+
 def speaker_text(conversation_text: str, speaker: str) -> str:
     """Only the lines spoken by `speaker` ("Agent" / "Customer").
 

@@ -32,9 +32,13 @@ streamlit run Home.py       # → http://localhost:8501
 # Compare Ollama models on the 4 analyses over stored transcripts (DB opened read-only)
 # → data\llm_compare\<timestamp>\report.md (gitignored: it quotes real calls)
 & ".venv\Scripts\python.exe" scripts\compare_llm_models.py --models <current> <candidate> [--limit N]
+
+# Compare Whisper models on stored call audio (production transcribe_hf, DB read-only, no diarization/LLM)
+# → data\stt_compare\<timestamp>\report.md; --refs DIR of <call_id>.txt adds CER; --no-prompt MODEL skips prompt_ids
+& ".venv\Scripts\python.exe" scripts\compare_stt_models.py --models <current> <candidate> [--calls ID ...]
 ```
 
-**Current test baseline:** 519 tests, must pass 100% before every commit.
+**Current test baseline:** 533 tests, must pass 100% before every commit.
 
 **External dependency:** Ollama must be running before processing calls:
 ```powershell
@@ -352,6 +356,8 @@ Key behaviors:
 - **One request, one job.** Bundling the next action into the QA request made the model drop it; it is its own request now.
 - **`scb10x/typhoon2.1-gemma3-12b` won't load on Ollama 0.32.5** ("selectattr: unknown test 'tool_calls'"): the GGUF's Jinja chat template hits a llama.cpp parser bug, and a Modelfile `TEMPLATE` doesn't override it. The local workaround is a copy of the GGUF with that validation loop blanked out (same byte length), imported as `typhoon2.1-gemma3-12b-local`. In the 13-call comparison it wrote better summaries/topics, but answered `sentiment_reason` in English on 9/13 calls and wrote bare-verb todos ("รอ", "ประสาน"); telling every analysis prompt to write Thai and asking for "คำกริยา + ทำอะไร/กับใคร" fixed both (0/13 English) without changing the 8B's answers. It also raised a false high-severity B2 (agent misinformation) on an ordinary item-name mix-up, which led to the B-category check in `misconduct_is_grounded()`. It still takes ~2× as long as the 8B — not switched yet.
 - **Testing Ollama with Thai from Git Bash `curl` sends mangled text** and the model answers nonsense; test through Python (`ollama_client.chat`).
+- **Typhoon Whisper on our calls (5 real calls, 30 min of audio, no hand-checked references yet):** `typhoon-ai/typhoon-whisper-large-v3` loops on one syllable ("ต้า ต้า ต้า …") when given our `prompt_ids` — it only works with the prompt off, and then loses "โลตัส" ("โลตาร์") and runs ~4× slower (22.6 s per audio minute, 5.2 GB) than the current model (5.9 s, 2.3 GB). `typhoon-whisper-turbo` keeps the prompt and the speed, reads places/dates a little better, but writes almost no spaces (1.1 per 100 chars vs 4.7), so `_SENTENCE_END_RE` — which needs a space after the particle — finds about half the boundaries. Both write numbers as Thai words ("แปดห้าห้า"), never digits. Through the full pipeline (diarization + speaker correction + analyses, on DB copies) Turbo was no worse: same total time, finer turns, and better topic/summary on 3 of 5 calls (e.g. the right `แจ้งปัญหาสินค้า / สปริง` where the current model gave `สอบถามข้อมูลสินค้า`) — the missing spaces did not visibly hurt speaker splitting. Not switched yet (5 calls is a small sample); switching means `.env`, the Settings dropdown and `_MODEL_RECOMMENDED_COMBO`.
+- **The speaker-correction model can write text, not just labels.** When it splits a segment into `parts` it writes each part's text itself; on call 295 it filled one with lines of its own prompt ("สวัสดีครับ/ค่ะ [ชื่อบริษัท] ขอบคุณที่ติดต่อ... เรียกอีกฝ่ายว่า "คุณลูกค้า"") in place of what was said, and the analyses misread the call. `correct_speakers()` now applies a split only when `insight_rules.split_keeps_text()` finds the parts are the segment's own words in order (≤10% added, ≥80% kept, spaces/punctuation ignored); otherwise the segment stays whole and the deterministic splitters handle it. On 10 real calls the model proposed 10 splits and none was usable (prompt text, "...", lines copied from elsewhere in the call) — the guard rejected all 10. The leak doesn't happen on every run: the model's answer differs between runs.
 - **Common Whisper errors:** "โอมาสนา"/"โนโลตัส"/"ฟิวทู" for brand names; "ที่โน่น"/"ทีเนี่ย" for "ที่นอน"; Thai phone numbers often mixed Thai/Arabic digits.
 - **fpdf2 hangs on Thai with `WrapMode.CHAR`** — `multi_cell` never returns on a long Thai run with no spaces at full width. The report wraps lines itself (`dashboard_report.wrap_text()`, never splitting a consonant from its vowel/tone marks) and draws each line with `cell()`. Text copied out of the PDF comes out reordered (side effect of HarfBuzz shaping); the printed text is correct.
 - **PowerShell:** Never use `cd` — set `Cwd` parameter instead.

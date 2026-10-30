@@ -140,12 +140,19 @@ def correct_speakers(conversation: list[dict]) -> list[dict]:
             if c is None:
                 result.append(dict(item))
             elif "parts" in c:
-                # Split segment into multiple sub-segments
-                for part in c["parts"]:
-                    speaker = part.get("speaker")
-                    text = part.get("text", "").strip()
-                    if speaker in ("Agent", "Customer") and text:
-                        result.append({**item, "speaker": speaker, "text": text})
+                # Split segment into multiple sub-segments — only if the parts are the
+                # segment's own words; otherwise keep it whole (the splitters run later).
+                parts = [
+                    (part.get("speaker"), str(part.get("text") or "").strip())
+                    for part in (c["parts"] if isinstance(c["parts"], list) else [])
+                    if isinstance(part, dict)
+                ]
+                parts = [(speaker, text) for speaker, text in parts if speaker in ("Agent", "Customer") and text]
+                if parts and insight_rules.split_keeps_text([text for _, text in parts], item.get("text", "")):
+                    result.extend({**item, "speaker": speaker, "text": text} for speaker, text in parts)
+                else:
+                    log.warning("correct_speakers: split of segment %s doesn't match its text — kept whole", i)
+                    result.append(dict(item))
             else:
                 speaker = c.get("speaker")
                 new_item = dict(item)

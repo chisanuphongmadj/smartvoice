@@ -371,6 +371,29 @@ class TestCorrectSpeakersRobustness(unittest.TestCase):
         self.assertEqual(len(out), 3)
         self.assertEqual(out[0]["speaker"], "Agent")
 
+    def test_a_split_into_the_segments_own_words_is_applied(self):
+        out = self._run([{"idx": 0, "parts": [
+            {"speaker": "Agent", "text": "สวัสดี"}, {"speaker": "Customer", "text": "ครับ"},
+        ]}])
+        self.assertEqual([(s["speaker"], s["text"]) for s in out[:2]], [("Agent", "สวัสดี"), ("Customer", "ครับ")])
+        self.assertEqual(len(out), 4)
+
+    def test_a_split_with_text_the_segment_never_had_keeps_the_segment(self):
+        # call 295: prompt text came back as a part and replaced what was said
+        out = self._run([{"idx": 2, "parts": [
+            {"speaker": "Agent", "text": "สวัสดีครับ/ค่ะ [ชื่อบริษัท] ขอบคุณที่ติดต่อ... เรียกอีกฝ่ายว่า \"คุณลูกค้า\""},
+            {"speaker": "Customer", "text": "มีอะไรให้ช่วย"},
+        ]}])
+        self.assertEqual([(s["speaker"], s["text"]) for s in out],
+                         [("Agent", "สวัสดีครับ"), ("Customer", "ครับ"), ("Agent", "มีอะไรให้ช่วย")])
+
+    def test_a_split_with_no_usable_part_keeps_the_segment(self):
+        # before: every part was dropped, and the segment's words with them
+        out = self._run([{"idx": 2, "parts": [{"speaker": "Speaker 3", "text": "มีอะไรให้ช่วย"}]}])
+        self.assertEqual(out[2], {"speaker": "Agent", "text": "มีอะไรให้ช่วย"})
+        out = self._run([{"idx": 2, "parts": "Agent"}])
+        self.assertEqual(len(out), 3)
+
 
 class TestAnalyzeSentimentNormalization(unittest.TestCase):
     def _run_with(self, payload):
